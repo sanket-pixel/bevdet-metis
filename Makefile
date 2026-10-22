@@ -8,6 +8,7 @@ SDK_PYTHON ?= $(SDK)/venv/bin/python
 CONFIG ?= configs/default.yaml
 BACKEND ?= cpp
 FRAMES ?= 20
+FPS ?= 2
 START ?= 0
 CALIB_FRAMES ?= 32
 PART ?= all
@@ -27,13 +28,13 @@ help:
 	  'make checkpoint   Download the optional original PyTorch checkpoint' \
 	  'make data         Download nuScenes mini; retain camera keyframes + metadata' \
 	  'make demo         Save a six-camera + BEV demo image' \
-	  'make video        Save a 20-frame demo video at native 2 Hz' \
+	  'make video        Save a 20-frame demo video (FPS=2; override with FPS=10)' \
 	  'make profile      Profile the selected backend without rendering' \
 	  'make verify       Validate the selected backend (default: C++ vs Python)' \
 	  'make compare      Compare C++ tensors, detections and timing to Python' \
 	  'make calibration  Cache 32 mini_train rig frames (192 camera images)' \
 	  'make compile      Compile all four CNN stages; PART=image selects one' \
-	  'Options: BACKEND=cpp|onnx|split|upstream|aipu FRAMES=20 START=0 CONFIG=configs/default.yaml'
+	  'Options: BACKEND=cpp|onnx|split|upstream|aipu FRAMES=20 FPS=2 START=0 CONFIG=configs/default.yaml'
 
 setup:
 	PYTHON="$(PYTHON)" ./setup.sh
@@ -61,7 +62,7 @@ ifeq ($(BACKEND),cpp)
 	@if [ "$@" != "profile" ]; then \
 	  "$(PYTHON)" python/render.py --config "$(CONFIG)" \
 	  --detections "$(OUTPUT_DIR)/$(if $(filter demo,$@),demo,video).jsonl" \
-	  --output "$(OUTPUT_DIR)/$(if $(filter demo,$@),demo.png,video.mp4)"; \
+	  --output "$(OUTPUT_DIR)/$(if $(filter demo,$@),demo.png,video.mp4)" $(if $(filter video,$@),--fps "$(FPS)"); \
 	fi
 else
 ifeq ($(BACKEND),aipu)

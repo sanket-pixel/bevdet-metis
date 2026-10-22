@@ -17,7 +17,10 @@ def main():
     parser.add_argument("--config", type=Path, default=ROOT / "configs/default.yaml")
     parser.add_argument("--detections", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--fps", type=int, default=2, help="Video playback frame rate (default: 2)")
     args = parser.parse_args()
+    if args.fps < 1:
+        parser.error("--fps must be positive")
     config = load_config(args.config)
     records = [json.loads(line) for line in args.detections.read_text().splitlines()]
     if not records or records[-1]["type"] != "summary" or not records[-1].get("completed", True):
@@ -53,7 +56,7 @@ def main():
                     "-video_size",
                     "1920x1080",
                     "-framerate",
-                    "2",
+                    str(args.fps),
                     "-i",
                     "-",
                     "-an",
