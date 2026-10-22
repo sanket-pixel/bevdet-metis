@@ -119,17 +119,25 @@ Validated on Ubuntu 24.04, Ryzen 7 3700X, Voyager compiler 1.7.0 and AxRuntime 1
 - All 114,688 image/depth projection indices match the unmodified upstream PyTorch implementation on the checked sample. The BEV maximum absolute difference is `1.91e-6`.
 - All four compiled CNN stages run in one Python process on four reserved Metis cores. Both CPU and AIPU paths have generated 20-frame, 1080p demo videos and detection JSONL files.
 
-The initial 20-frame profiles, including the first frame, are:
+On the same 20 rig samples, a before/after check against baseline commit `261d091` measured the following. Model binaries, calibration, thresholds and input sizes were unchanged; both runs include the first frame.
 
-| Stage | FP32 ONNX CPU | INT8 Metis + host |
+| Stage | Initial Metis implementation | After host optimization |
 | --- | ---: | ---: |
-| Preprocessing, including JPEG reads | 150.2 ms | 156.0 ms |
-| Inference, including host geometry/resize | 734.1 ms | 275.9 ms |
-| Box decoding and NMS | 3.6 ms | 4.3 ms |
-| Complete pipeline | **887.9 ms** | **436.2 ms** |
-| Processing throughput | 1.13 rig frames/s | 2.29 rig frames/s |
+| Preprocessing, including JPEG reads | 150.6 ms | 64.4 ms |
+| Inference, including host geometry/resize | 246.6 ms | 136.0 ms |
+| Box decoding and NMS | 4.3 ms | 4.2 ms |
+| Complete pipeline | **401.4 ms** | **204.6 ms** |
+| Processing throughput | 2.49 rig frames/s | 4.89 rig frames/s |
 
-These are synchronous Python bring-up measurements, not optimized deployment results. INT8 changes detections: the first demo sample gives 33 FP32 boxes and 24 INT8 boxes at the same 0.4 threshold. Three-frame numeric comparisons are saved in `results/aipu_validation.json`; rotation and velocity outputs show appreciable quantization differences. Full detection accuracy, improved calibration/PTQ, concurrent camera scheduling and removal of host overhead remain follow-up work.
+The initial separate profile was 436 ms; timing varies with host load. The paired check is recorded in `results/optimization_validation.json`. Across all 20 samples, preprocessed images, projection indices, all six raw head tensors and decoded boxes were **bit-for-bit identical** before and after optimization.
+
+Host improvements include parallel loading/resizing of the six camera images, cache-friendly blocked NCHW/NHWC conversion, reusable quantization scratch buffers, limiting pixel-coordinate work to eligible voxels, and height-slice accumulation instead of materializing the full voxel feature volume. Idle [ONNX Runtime worker spinning](https://onnxruntime.ai/docs/performance/tune-performance/threading.html) is disabled so the small host resize sessions do not compete unnecessarily with other CPU work.
+
+`make profile BACKEND=aipu` reports the four main stages and detailed inference/preprocessing timings. Inference details include total image processing across six cameras, each BEV CNN, host lifting/resizing, and aggregate quantization, AxRuntime execution and dequantization. These are overlapping breakdowns of the inference total; they should not all be added together. AxRuntime execution averages approximately 59 ms across all nine model calls and includes transfers and waiting, rather than measuring only AIPU arithmetic.
+
+Core allocation and scheduling are distinct: four cores are reserved, with one model stage on each, but a single frame still executes those stages in order. Its six camera CNN calls share the image core. Independent frames are not yet pipelined across the stages, so these measurements do not represent full four-core throughput.
+
+INT8 changes detections: the first demo sample gives 33 FP32 boxes and 24 INT8 boxes at the same 0.4 threshold. Three-frame numeric comparisons are saved in `results/aipu_validation.json`; rotation and velocity outputs show appreciable quantization differences. Full detection accuracy, improved calibration/PTQ, concurrent scheduling and further host optimization remain follow-up work.
 
 ## Layout
 

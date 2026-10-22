@@ -71,6 +71,7 @@ def main():
             f"Calibration {index + 1}/{len(frames)}: {frame['scene']} ({perf_counter() - start:.1f}s)",
             flush=True,
         )
+    preprocessing.Close()
     manifest.write_text(
         json.dumps(
             {

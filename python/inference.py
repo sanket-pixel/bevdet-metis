@@ -13,6 +13,8 @@ def session(path, threads):
     options = ort.SessionOptions()
     options.intra_op_num_threads = threads
     options.inter_op_num_threads = 1
+    options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    options.add_session_config_entry("session.inter_op.allow_spinning", "0")
     return ort.InferenceSession(str(path), options, providers=["CPUExecutionProvider"])
 
 

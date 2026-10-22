@@ -35,8 +35,18 @@ class Pipeline:
             "postprocessing": (end - inf_end) * 1000,
             "pipeline": (end - start) * 1000,
         }
+        if hasattr(self.inference, "timings"):
+            timings.update(
+                {f"inference_{key}": value for key, value in self.inference.timings.items()}
+            )
+        timings.update(
+            {f"preprocessing_{key}": value for key, value in self.preprocessing.timings.items()}
+        )
         return boxes, prepared, timings
 
     def Close(self):
-        if hasattr(self.inference, "Close"):
-            self.inference.Close()
+        try:
+            if hasattr(self.inference, "Close"):
+                self.inference.Close()
+        finally:
+            self.preprocessing.Close()

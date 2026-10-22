@@ -163,6 +163,7 @@ def main():
     ]
     if args.backend == "aipu":
         check_aipu(config, preprocessing, frames, full)
+        preprocessing.Close()
         return
     split = OnnxInference(config, split=True)
     parts = {
@@ -212,6 +213,7 @@ def main():
         + "\n"
     )
     print("Saved results/onnx_validation.json", flush=True)
+    preprocessing.Close()
 
 
 if __name__ == "__main__":

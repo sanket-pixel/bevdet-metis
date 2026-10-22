@@ -3,6 +3,7 @@
 
 import json
 from contextlib import ExitStack
+from time import perf_counter
 
 import numpy as np
 import onnx
@@ -94,6 +95,10 @@ class AipuModel:
             np.full(info.shape, int(np.clip(info.zero_point, -128, 127)), dtype=np.int8)
             for info in self.inputs
         ]
+        self.quantization_work = [
+            np.empty((n, min(c, 8), h, w), dtype=np.float32)
+            for n, c, h, w in manifest["input_shapes_original"]
+        ]
         self.output_buffers = [np.empty(info.shape, dtype=np.int8) for info in self.outputs]
         self.instance = stack.enter_context(
             connection.load_model_instance(
@@ -113,27 +118,56 @@ class AipuModel:
         )
 
     def run(self, names, values):
+        start = perf_counter()
         if set(values) != set(self.input_names):
             raise ValueError("Input identities differ from the compiled stage")
-        for name, info, buffer in zip(self.input_names, self.inputs, self.input_buffers):
-            value = np.asarray(values[name], dtype=np.float32).transpose(0, 2, 3, 1)
-            if value.shape != tuple(info.unpadded_shape):
+        for name, info, buffer, scratch in zip(
+            self.input_names, self.inputs, self.input_buffers, self.quantization_work
+        ):
+            value = np.asarray(values[name], dtype=np.float32)
+            n, h, w, channels = info.unpadded_shape
+            if value.shape != (n, channels, h, w):
                 raise ValueError(f"Unexpected input shape for {name}: {value.shape}")
-            rounded = np.rint(value / np.float32(info.scale) + np.float32(info.zero_point))
-            buffer[self.crop(info)] = np.clip(rounded, -128, 127).astype(np.int8)
+            destination = buffer[self.crop(info)]
+            # Small channel blocks avoid cache thrashing in the NCHW -> padded NHWC copy.
+            for channel in range(0, channels, scratch.shape[1]):
+                count = min(scratch.shape[1], channels - channel)
+                work = scratch[:, :count]
+                np.divide(value[:, channel : channel + count], np.float32(info.scale), out=work)
+                np.add(work, np.float32(info.zero_point), out=work)
+                np.rint(work, out=work)
+                np.clip(work, -128, 127, out=work)
+                destination[:, :, :, channel : channel + count] = work.astype(np.int8).transpose(
+                    0, 2, 3, 1
+                )
             if buffer.nbytes != info.size:
                 raise ValueError("Runtime input buffer byte count mismatch")
         native_inputs = [
             self.input_buffers[binding].reshape(shape)
             for binding, shape in zip(self.bindings, self.native_input_shapes)
         ]
+        quantized = perf_counter()
         self.instance.run(native_inputs, self.output_buffers)
+        executed = perf_counter()
         outputs = {}
         for name, info, buffer in zip(self.output_names, self.outputs, self.output_buffers):
-            logical = buffer[self.crop(info)].astype(np.float32)
+            raw = buffer[self.crop(info)]
+            n, h, w, channels = raw.shape
+            reordered = np.empty((n, channels, h, w), dtype=np.int8)
+            for channel in range(0, channels, 8):
+                reordered[:, channel : channel + 8] = raw[:, :, :, channel : channel + 8].transpose(
+                    0, 3, 1, 2
+                )
+            logical = reordered.astype(np.float32)
             logical -= np.float32(info.zero_point)
             logical *= np.float32(info.scale)
-            outputs[name] = np.ascontiguousarray(logical.transpose(0, 3, 1, 2))
+            outputs[name] = logical
+        end = perf_counter()
+        self.timings = {
+            "quantization": (quantized - start) * 1000,
+            "runtime_execution": (executed - quantized) * 1000,
+            "dequantization": (end - executed) * 1000,
+        }
         return [outputs[name] for name in (names or self.output_names)]
 
 
@@ -160,19 +194,32 @@ class AipuInference:
             self.stack.close()
             raise
 
+    def RunPart(self, name, values):
+        start = perf_counter()
+        part = self.parts[name]
+        result = part.run(None, values)
+        self.timings[name] = self.timings.get(name, 0) + (perf_counter() - start) * 1000
+        for key, duration in part.timings.items():
+            self.timings[key] = self.timings.get(key, 0) + duration
+        return result
+
     def Process(self, prepared):
+        self.timings = {}
         features = np.concatenate(
-            [
-                self.parts["image"].run(None, {"image": image[None]})[0]
-                for image in prepared["images"]
-            ]
+            [self.RunPart("image", {"image": image[None]})[0] for image in prepared["images"]]
         )
+        start = perf_counter()
         bev = view_transform(features, prepared["coors_img"], prepared["coors_depth"])
-        packed = self.parts["bev_backbone"].run(None, {"bev": bev})[0]
+        self.timings["view_transform"] = (perf_counter() - start) * 1000
+        packed = self.RunPart("bev_backbone", {"bev": bev})[0]
+        start = perf_counter()
         value = self.neck_resize.run(None, {"packed": packed})[0]
-        value = self.parts["bev_neck"].run(None, {"neck_input": value})[0]
+        self.timings["host_resize"] = (perf_counter() - start) * 1000
+        value = self.RunPart("bev_neck", {"neck_input": value})[0]
+        start = perf_counter()
         value = self.head_resize.run(None, {"neck_features": value})[0]
-        heads = self.parts["detection_head"].run(list(HEADS), {"head_input": value})
+        self.timings["host_resize"] += (perf_counter() - start) * 1000
+        heads = self.RunPart("detection_head", {"head_input": value})
         return dict(zip(HEADS, heads))
 
     def Close(self):
