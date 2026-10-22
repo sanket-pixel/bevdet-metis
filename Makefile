@@ -8,6 +8,7 @@ SDK_PYTHON ?= $(SDK)/venv/bin/python
 CONFIG ?= configs/default.yaml
 FRAMES ?= 80
 FPS ?= 2
+DISPLAY_FPS ?= 10.10
 START ?= 0
 CALIB_FRAMES ?= 32
 PART ?= all
@@ -29,11 +30,11 @@ help:
 	  'make data         Download nuScenes mini; retain camera keyframes + metadata' \
 	  'make demo         Save a six-camera + BEV demo image' \
 	  'make video        Save an 80-frame demo video (FPS=2; override with FPS=10)' \
-	  'make showcase    Run 300 optimized samples; render a 30-second 10 FPS montage' \
+	  'make showcase    Run 300 optimized samples; render a 30-second 10.10 FPS montage' \
 	  'make profile      Profile the C++ application without rendering' \
 	  'make calibration  Cache 32 mini_train rig frames (192 camera images)' \
 	  'make compile      Compile all four CNN stages; PART=image selects one' \
-	  'Options: FRAMES=80 FPS=2 START=0 CONFIG=configs/default.yaml OUTPUT_DIR=results/cpp'
+	  'Options: FRAMES=80 FPS=2 DISPLAY_FPS=10.10 START=0 CONFIG=configs/default.yaml OUTPUT_DIR=results/cpp'
 
 setup:
 	PYTHON="$(PYTHON)" ./setup.sh
@@ -53,9 +54,9 @@ showcase: build
 	  "$(BUILD_DIR)/bevdet_metis" --config "$(CONFIG)" --scene "$$scene" --frames "$$count" \
 	    --output "$(SHOWCASE_DIR)/$$scene.jsonl"; \
 	done
-	"$(PYTHON)" python/render.py --config "$(CONFIG)" --fps 10 --display-fps 10.10 --detections \
+	"$(PYTHON)" python/render.py --config "$(CONFIG)" --fps 10 --display-fps "$(DISPLAY_FPS)" --detections \
 	  $(foreach scene,scene-0061 scene-0103 scene-0553 scene-0655 scene-0757 scene-0796 scene-0916 scene-1077,"$(SHOWCASE_DIR)/$(scene).jsonl") \
-	  --output "$(SHOWCASE_DIR)/bevdet_metis_30s_10fps.mp4"
+	  --output "$(SHOWCASE_DIR)/bevdet_metis_30s_10_10fps.mp4"
 
 checkpoint:
 	"$(PYTHON)" python/download.py checkpoint
@@ -71,7 +72,7 @@ demo video profile: build
 	@if [ "$@" != "profile" ]; then \
 	  "$(PYTHON)" python/render.py --config "$(CONFIG)" \
 	  --detections "$(OUTPUT_DIR)/$(if $(filter demo,$@),demo,video).jsonl" \
-	  --output "$(OUTPUT_DIR)/$(if $(filter demo,$@),demo.png,video.mp4)" $(if $(filter video,$@),--fps "$(FPS)"); \
+	  --output "$(OUTPUT_DIR)/$(if $(filter demo,$@),demo.png,video.mp4)" $(if $(filter video,$@),--fps "$(FPS)" --display-fps "$(DISPLAY_FPS)"); \
 	fi
 
 calibration:

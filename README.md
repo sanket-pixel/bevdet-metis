@@ -4,7 +4,7 @@
 
 Surround-view 3D perception is useful when a robot or vehicle needs to understand nearby objects and free space from cameras. A bird's-eye-view (BEV) representation combines the six views into one ego-centric grid, where the detector predicts oriented 3D boxes, classes, confidence and planar velocity. This project focuses on the deployment problem: splitting a camera-based BEV model between a low-power edge accelerator and the host while preserving its input, geometry and output conventions.
 
-![FastBEV++ six-camera 3D detection running on Metis](assets/bevdet-metis-demo.gif)
+![FastBEV++ six-camera 3D detection running on Metis](assets/bevdet-metis-demo-10-10fps.gif)
 
 ## Design and execution
 
