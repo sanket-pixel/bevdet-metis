@@ -4,31 +4,18 @@
 from pathlib import Path
 
 import numpy as np
-from common import CAMERAS, CLASSES
 from PIL import Image, ImageDraw, ImageFont
 from postprocessing import corners_bev
 
-COLORS = (
-    (99, 232, 218),
-    (255, 193, 111),
-    (183, 164, 235),
-    (118, 176, 245),
-    (198, 171, 122),
-    (154, 177, 199),
-    (238, 140, 179),
-    (157, 215, 132),
-    (245, 155, 118),
-    (224, 219, 125),
-)
-BG, FG, MUTED = (12, 18, 25), (236, 243, 246), (133, 154, 168)
-
-
-def font(size, bold=False):
-    name = "Ubuntu-M.ttf" if bold else "Ubuntu-R.ttf"
-    path = Path("/usr/share/fonts/truetype/ubuntu") / name
-    return ImageFont.truetype(
-        str(path) if path.exists() else ("DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"), size
-    )
+BACKGROUND = (248, 248, 245)
+FOREGROUND = (37, 41, 43)
+SECONDARY = (111, 117, 118)
+RULE = (210, 213, 210)
+GRID = (228, 230, 227)
+AXIS = (184, 190, 186)
+BOX = (166, 101, 84)
+FONT = Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf")
+BOLD = Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf")
 
 
 def corners_3d(box):
@@ -46,123 +33,110 @@ def corners_3d(box):
 
 
 class Renderer:
-    def __init__(self, directory, backend):
-        self.directory, self.backend = directory, backend
-        self.fonts = {size: font(size) for size in (12, 16, 18, 20, 22, 28, 40, 60)}
+    def __init__(self, directory, processing_fps):
+        self.directory = directory
+        self.processing_fps = processing_fps
+        self.fonts = {
+            size: ImageFont.truetype(str(FONT), size) for size in (15, 17, 20, 26, 32)
+        }
+        self.bold = ImageFont.truetype(str(BOLD), 26)
 
-    def Process(self, frame, boxes, prepared, timings, index=0, total=1):
-        canvas = Image.new("RGB", (1920, 1080), BG)
+    def Process(self, frame, boxes, prepared, index=0, total=1):
+        canvas = Image.new("RGB", (1920, 1080), BACKGROUND)
         draw = ImageDraw.Draw(canvas)
-        draw.text((48, 28), "bevdet / metis", font=font(40, True), fill=FG)
-        draw.text((48, 82), "SIX-CAMERA 3D DETECTION / FASTBEV++", font=self.fonts[18], fill=MUTED)
-        badge = "INT8 / AXELERA METIS" if self.backend in ("aipu", "cpp") else "ONNX CPU REFERENCE"
-        draw.text((1500, 53), badge, font=self.fonts[22], fill=COLORS[0])
-        draw.line((48, 123, 1872, 123), fill=(45, 59, 70))
-        draw.text((48, 145), "01 / CAMERA PROJECTIONS", font=self.fonts[20], fill=MUTED)
-        draw.text((1360, 145), "02 / BIRD'S-EYE VIEW", font=self.fonts[20], fill=MUTED)
-        edge_pairs = (
-            (0, 1),
-            (1, 2),
-            (2, 3),
-            (3, 0),
-            (4, 5),
-            (5, 6),
-            (6, 7),
-            (7, 4),
-            (0, 4),
-            (1, 5),
-            (2, 6),
-            (3, 7),
+
+        draw.text((64, 28), "Multi-camera 3D detection", font=self.bold, fill=FOREGROUND)
+        draw.text(
+            (64, 61), "nuScenes mini · FastBEV++ · Axelera Metis",
+            font=self.fonts[17], fill=SECONDARY,
         )
-        for camera, name in enumerate(CAMERAS):
+        draw.text((1410, 27), f"{self.processing_fps:.1f} FPS", font=self.bold, fill=FOREGROUND)
+        draw.text((1412, 60), "mean processing rate", font=self.fonts[17], fill=SECONDARY)
+        draw.text((1640, 27), f"{len(boxes)} detections", font=self.bold, fill=FOREGROUND)
+        draw.line((64, 94, 1856, 94), fill=RULE, width=1)
+
+        edge_pairs = (
+            (0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6),
+            (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7),
+        )
+        camera_names = (
+            "CAM_FRONT_LEFT", "CAM_FRONT", "CAM_FRONT_RIGHT",
+            "CAM_BACK_LEFT", "CAM_BACK", "CAM_BACK_RIGHT",
+        )
+        image_width, image_height = 448, 252
+        for camera, name in enumerate(camera_names):
             record = frame["cameras"][name]
             with Image.open(self.directory / record["file"]) as source:
                 original = source.size
-                panel = source.convert("RGB").resize((416, 234), Image.Resampling.LANCZOS)
+                panel = source.convert("RGB").resize(
+                    (image_width, image_height), Image.Resampling.LANCZOS
+                )
             panel_draw = ImageDraw.Draw(panel)
             camera_from_key = np.linalg.inv(prepared["camera_to_keyego"][camera])
-            intrinsic = np.array(record["calibration"]["camera_intrinsic"])
+            intrinsic = np.asarray(record["calibration"]["camera_intrinsic"])
             for box in boxes:
-                color = COLORS[box["class_id"]]
                 points = corners_3d(box) @ camera_from_key[:3, :3].T + camera_from_key[:3, 3]
                 projected = points @ intrinsic.T
                 depth = projected[:, 2]
                 xy = projected[:, :2] / np.maximum(depth[:, None], 0.01)
-                xy *= [416 / original[0], 234 / original[1]]
-                for a, b in edge_pairs:
-                    if depth[a] > 0.1 and depth[b] > 0.1:
-                        panel_draw.line([tuple(xy[a]), tuple(xy[b])], fill=color, width=2)
-            left, top = 48 + (camera % 3) * 432, 211 + (camera // 3) * 286
-            draw.text(
-                (left, top - 27),
-                name.replace("CAM_", "").replace("_", " "),
-                font=self.fonts[16],
-                fill=MUTED,
-            )
-            canvas.paste(panel, (left, top))
-        bev_panel = Image.new("RGB", (512, 512), (17, 27, 36))
+                xy *= [image_width / original[0], image_height / original[1]]
+                for first, second in edge_pairs:
+                    if depth[first] > 0.1 and depth[second] > 0.1:
+                        panel_draw.line(
+                            [tuple(xy[first]), tuple(xy[second])], fill=BOX, width=1
+                        )
+
+            column, row = camera % 2, camera // 2
+            left, top = 64 + column * 464, 112 + row * 290
+            label = name.removeprefix("CAM_").replace("_", " ").lower()
+            draw.text((left, top), label, font=self.fonts[15], fill=SECONDARY)
+            canvas.paste(panel, (left, top + 22))
+
+        map_left, map_top, map_size = 1008, 112, 848
+        draw.text((map_left, map_top), "Bird's-eye view · ego frame", font=self.fonts[15], fill=SECONDARY)
+        map_top += 22
+        bev_panel = Image.new("RGB", (map_size, map_size), (252, 252, 250))
         bev_draw = ImageDraw.Draw(bev_panel)
-        scale = 5.0
+        scale = map_size / 102.4
 
         def project(point):
             x, y = point[:2]
-            return 256 - y * scale, 256 - x * scale
+            return map_size / 2 - y * scale, map_size / 2 - x * scale
 
         for metres in range(-50, 51, 10):
-            bev_draw.line((project((metres, -51.2)), project((metres, 51.2))), fill=(30, 42, 53))
-            bev_draw.line((project((-51.2, metres)), project((51.2, metres))), fill=(30, 42, 53))
-        for box in boxes:
-            color = COLORS[box["class_id"]]
-            polygon = corners_bev([*box["center"], *box["dimensions"], box["yaw"]])
-            xy = [project(p) for p in polygon]
-            bev_draw.line(xy + [xy[0]], fill=color, width=2)
-            nose = (
-                np.array(box["center"][:2])
-                + np.array([np.cos(box["yaw"]), np.sin(box["yaw"])]) * box["dimensions"][0] / 2
+            color = AXIS if metres == 0 else GRID
+            bev_draw.line(
+                (project((metres, -51.2)), project((metres, 51.2))), fill=color, width=1
             )
-            bev_draw.line((project(box["center"]), project(nose)), fill=color, width=2)
+            bev_draw.line(
+                (project((-51.2, metres)), project((51.2, metres))), fill=color, width=1
+            )
+        for box in boxes:
+            polygon = corners_bev([*box["center"], *box["dimensions"], box["yaw"]])
+            points = [project(point) for point in polygon]
+            bev_draw.line(points + [points[0]], fill=BOX, width=1)
+            nose = np.asarray(box["center"][:2]) + np.asarray(
+                [np.cos(box["yaw"]), np.sin(box["yaw"])]
+            ) * box["dimensions"][0] / 2
+            bev_draw.line((project(box["center"]), project(nose)), fill=BOX, width=1)
         bev_draw.polygon(
-            (project((2.2, 1)), project((2.2, -1)), project((-2.2, -1)), project((-2.2, 1))),
-            fill=FG,
+            (
+                project((2.2, 1)), project((2.2, -1)),
+                project((-2.2, -1)), project((-2.2, 1)),
+            ),
+            fill=FOREGROUND,
         )
-        bev_draw.text((13, 484), "x forward / y left / 10 m grid", font=self.fonts[16], fill=MUTED)
-        canvas.paste(bev_panel, (1360, 190))
-        draw.text((48, 817), "CLASSES", font=self.fonts[18], fill=MUTED)
-        for i, name in enumerate(CLASSES):
-            x, y = 48 + (i % 5) * 260, 858 + (i // 5) * 40
-            draw.rectangle((x, y + 3, x + 9, y + 12), fill=COLORS[i])
-            label = "construction" if name == "construction_vehicle" else name.replace("_", " ")
-            draw.text((x + 20, y), label, font=self.fonts[18], fill=FG)
-        draw.text((1360, 749), str(len(boxes)), font=self.fonts[60], fill=FG)
-        draw.text((1480, 785), "3D detections", font=self.fonts[22], fill=MUTED)
+        canvas.paste(bev_panel, (map_left, map_top))
+
+        footer_y = 1020
+        draw.line((64, footer_y, 1856, footer_y), fill=RULE, width=1)
         draw.text(
-            (1360, 857),
-            f"{timings['pipeline']:.0f} ms / frame",
-            font=self.fonts[28],
-            fill=COLORS[0],
+            (64, footer_y + 14),
+            f"{frame['scene']}   ·   frame {index + 1:03d} / {total:03d}",
+            font=self.fonts[17], fill=SECONDARY,
         )
         draw.text(
-            (1360, 906),
-            "CPU reference / rendering excluded"
-            if self.backend not in ("aipu", "cpp")
-            else "Host + AIPU / rendering excluded",
-            font=self.fonts[18],
-            fill=MUTED,
+            (1480, footer_y + 14), "forward ↑   ·   left ←   ·   10 m grid",
+            font=self.fonts[17], fill=SECONDARY,
         )
-        draw.text(
-            (48, 975),
-            f"nuScenes mini / {frame['scene']} / frame {index + 1:03d} of {total:03d}",
-            font=self.fonts[20],
-            fill=MUTED,
-        )
-        draw.line((48, 1019, 1872, 1019), fill=(39, 54, 65), width=2)
-        draw.line((48, 1019, 48 + 1824 * (index + 1) / total, 1019), fill=COLORS[0], width=2)
-        draw.text(
-            (48, 1034),
-            "nuScenes / Motional / CC BY-NC-SA 4.0 / camera-only input",
-            font=self.fonts[18],
-            fill=MUTED,
-        )
-        label = "FastBEV++ / C++ pipeline" if self.backend == "cpp" else "FastBEV++ ONNX baseline"
-        draw.text((1450, 1034), label, font=self.fonts[18], fill=MUTED)
         return canvas

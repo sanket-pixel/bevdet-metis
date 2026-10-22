@@ -22,13 +22,15 @@ struct Arguments {
     std::filesystem::path dump_directory;
     int frames = 20;
     int start = 0;
+    std::string scene;
     bool profile = false;
 };
 
 std::optional<Arguments> ParseArguments(int argc, char** argv) {
     constexpr const char* usage =
         "Usage: bevdet_metis --config <yaml> [--frames 20] [--start 0]\n"
-        "  [--output results/cpp/profile.jsonl] [--profile] [--dump-directory <path>]\n";
+        "  [--output results/cpp/profile.jsonl] [--profile] [--dump-directory <path>]\n"
+        "  [--scene scene-name]\n";
     if (argc == 2 && (std::string_view(argv[1]) == "--help" || std::string_view(argv[1]) == "-h")) {
         std::cout << usage;
         return std::nullopt;
@@ -52,6 +54,8 @@ std::optional<Arguments> ParseArguments(int argc, char** argv) {
             args.frames = std::stoi(argv[i]);
         else if (option == "--start")
             args.start = std::stoi(argv[i]);
+        else if (option == "--scene")
+            args.scene = argv[i];
         else
             throw std::invalid_argument("Unknown argument: " + option);
     }
@@ -88,7 +92,9 @@ void PrintProfile(const bev::Timings& means, std::size_t frames) {
 }
 
 void Run(const Arguments& args) {
-    const auto config = bev::LoadConfig(args.config);
+    auto config = bev::LoadConfig(args.config);
+    if (!args.scene.empty())
+        config.data.scene = args.scene;
     const bev::Dataset dataset(config.data.directory);
     const auto frames = dataset.frames(config.data.scene, args.start, args.frames);
     bev::Pipeline pipeline(config, !args.dump_directory.empty());

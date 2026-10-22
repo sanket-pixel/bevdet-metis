@@ -79,7 +79,8 @@ The pinned upstream `FastrayTransformer.forward()` applies a sigmoid to depth lo
 | --- | --- |
 | `make build` | Build `build/bevdet_metis` and the reusable `bevdet_cpp` library |
 | `make demo` | C++ detections + one rendered sample, `results/cpp/demo.png` |
-| `make video` | C++ detections + 20 samples at 2 FPS, `results/cpp/video.mp4` |
+| `make video` | C++ detections + 80 samples at 2 FPS, `results/cpp/video.mp4` |
+| `make showcase` | 300 optimized detections across eight nuScenes mini scenes; clean 30-second video at 10 FPS |
 | `make profile` | C++ timings without rendering or encoding |
 | `make compare` | Compare C++ with Python AxRuntime on 20 samples and dump/check three tensor traces |
 | `make verify` | Same C++ comparison by default |
@@ -90,6 +91,7 @@ The pinned upstream `FastrayTransformer.forward()` applies a sigmoid to depth lo
 
 ```bash
 make video FRAMES=30 START=5 FPS=10
+make showcase
 make compare FRAMES=20
 make demo BACKEND=split
 make profile BACKEND=onnx FRAMES=20
@@ -112,7 +114,7 @@ To adjust the presentation without repeating inference:
   --detections results/cpp/video.jsonl --output results/cpp/video.mp4
 ```
 
-`make video` renders at 2 FPS by default, matching nuScenes' annotated keyframe interval. Set `FPS=10` for smoother playback; this changes playback speed, not the sampled frames or processing throughput. Profiling includes six JPEG reads, image preprocessing, projection-index construction, model execution, geometry and box decoding; it excludes model loading, visualization, JSON export and video encoding. Averages include the first processed frame.
+`make video` renders at 2 FPS by default, matching nuScenes' annotated keyframe interval. Set `FPS=10` for smoother playback; this changes playback speed, not the sampled frames or processing throughput. `make showcase` processes a fixed 300-frame selection across eight scenes and writes a scene-labelled, 30-second video at 10 FPS to `results/optimized/final_30s/bevdet_metis_30s_10fps.mp4`. The frames come from separate nuScenes mini scenes; the scene label identifies each cut. Set `SHOWCASE_DIR=path` to choose another output folder. Profiling includes six JPEG reads, image preprocessing, projection-index construction, model execution, geometry and box decoding; it excludes model loading, visualization, JSON export and video encoding. Averages include the first processed frame.
 
 ## Metis execution
 

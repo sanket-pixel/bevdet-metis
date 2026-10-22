@@ -15,30 +15,42 @@ from visualize import Renderer
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / "configs/default.yaml")
-    parser.add_argument("--detections", type=Path, required=True)
+    parser.add_argument("--detections", type=Path, nargs="+", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--fps", type=int, default=2, help="Video playback frame rate (default: 2)")
     args = parser.parse_args()
     if args.fps < 1:
         parser.error("--fps must be positive")
     config = load_config(args.config)
-    records = [json.loads(line) for line in args.detections.read_text().splitlines()]
-    if not records or records[-1]["type"] != "summary" or not records[-1].get("completed", True):
-        raise ValueError("Detections file is incomplete")
-    metadata = records[0]
-    if metadata["scene"] != config.scene:
-        raise ValueError("Detections and config select different scenes")
-    frames = {
-        frame["token"]: frame for frame in Dataset(config.dataset_directory).frames(config.scene)
-    }
-    detections = [record for record in records if record["type"] == "frame"]
-    if not detections or len(detections) != records[-1]["frames"]:
-        raise ValueError("Detections count differs from the summary")
+    metadata = None
+    detections = []
+    for detections_file in args.detections:
+        records = [json.loads(line) for line in detections_file.read_text().splitlines()]
+        if not records or records[-1]["type"] != "summary" or not records[-1].get("completed", True):
+            raise ValueError(f"Detections file is incomplete: {detections_file}")
+        current_metadata = records[0]
+        if metadata is None:
+            metadata = current_metadata
+        elif current_metadata["backend"] != metadata["backend"]:
+            raise ValueError("All detections files must use the same backend")
+        current_detections = [record for record in records if record["type"] == "frame"]
+        if not current_detections or len(current_detections) != records[-1]["frames"]:
+            raise ValueError(f"Detections count differs from the summary: {detections_file}")
+        for record in current_detections:
+            record.setdefault("scene", current_metadata["scene"])
+        detections.extend(current_detections)
+    if not detections:
+        raise ValueError("No detections to render")
     is_video = args.output.suffix == ".mp4"
     if not is_video and (len(detections) != 1 or args.output.suffix != ".png"):
         raise ValueError("Choose PNG for one frame or MP4 for a video")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    renderer = Renderer(config.dataset_directory, metadata["backend"])
+    dataset = Dataset(config.dataset_directory)
+    frames = {}
+    for scene in dict.fromkeys(record["scene"] for record in detections):
+        frames.update({frame["token"]: frame for frame in dataset.frames(scene)})
+    mean_pipeline_ms = sum(record["timings_ms"]["pipeline"] for record in detections) / len(detections)
+    renderer = Renderer(config.dataset_directory, 1000.0 / mean_pipeline_ms)
     preprocessing = Preprocessing(config.dataset_directory)
     writer = None
     try:
@@ -78,7 +90,7 @@ def main():
             frame = frames[record["token"]]
             prepared = {"camera_to_keyego": preprocessing.camera_transforms(frame)}
             image = renderer.Process(
-                frame, record["boxes"], prepared, record["timings_ms"], index, len(detections)
+                frame, record["boxes"], prepared, index, len(detections)
             )
             if writer:
                 writer.stdin.write(image.tobytes())
