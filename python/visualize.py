@@ -55,7 +55,7 @@ class Renderer:
         draw = ImageDraw.Draw(canvas)
         draw.text((48, 28), "bevdet / metis", font=font(40, True), fill=FG)
         draw.text((48, 82), "SIX-CAMERA 3D DETECTION / FASTBEV++", font=self.fonts[18], fill=MUTED)
-        badge = "ONNX CPU REFERENCE" if self.backend != "aipu" else "INT8 / AXELERA METIS"
+        badge = "INT8 / AXELERA METIS" if self.backend in ("aipu", "cpp") else "ONNX CPU REFERENCE"
         draw.text((1500, 53), badge, font=self.fonts[22], fill=COLORS[0])
         draw.line((48, 123, 1872, 123), fill=(45, 59, 70))
         draw.text((48, 145), "01 / CAMERA PROJECTIONS", font=self.fonts[20], fill=MUTED)
@@ -144,7 +144,7 @@ class Renderer:
         draw.text(
             (1360, 906),
             "CPU reference / rendering excluded"
-            if self.backend != "aipu"
+            if self.backend not in ("aipu", "cpp")
             else "Host + AIPU / rendering excluded",
             font=self.fonts[18],
             fill=MUTED,
@@ -163,5 +163,6 @@ class Renderer:
             font=self.fonts[18],
             fill=MUTED,
         )
-        draw.text((1450, 1034), "FastBEV++ ONNX baseline", font=self.fonts[18], fill=MUTED)
+        label = "FastBEV++ / C++ pipeline" if self.backend == "cpp" else "FastBEV++ ONNX baseline"
+        draw.text((1450, 1034), label, font=self.fonts[18], fill=MUTED)
         return canvas
