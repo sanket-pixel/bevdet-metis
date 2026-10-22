@@ -80,7 +80,7 @@ The dataset, model and derived demonstration imagery have their own distribution
 | `make compile` | Calibrate and compile all four CNN stages with Voyager |
 | `make demo` | Process one frame and save `results/cpp/demo.png` |
 | `make video` | Save a video and detections under `results/cpp/` |
-| `make showcase` | Run 60 frames across four scenes and render a 30-second video at nuScenes' 2 FPS cadence |
+| `make showcase` | Run 240 frames across eight scenes and render a 30-second video at 8 FPS |
 | `make profile` | Profile without rendering; save timing JSON under `results/cpp/` |
 
 Common options:

@@ -30,7 +30,7 @@ help:
 	  'make data         Download nuScenes mini; retain camera keyframes + metadata' \
 	  'make demo         Save a six-camera + BEV demo image' \
 	  'make video        Save an 80-frame demo video (FPS=2; override with FPS=10)' \
-	  'make showcase    Run 60 samples; render a 30-second montage at nuScenes cadence' \
+	  'make showcase    Run 240 samples; render a 30-second montage at 8 FPS' \
 	  'make profile      Profile the C++ application without rendering' \
 	  'make calibration  Cache 32 mini_train rig frames (192 camera images)' \
 	  'make compile      Compile all four CNN stages; PART=image selects one' \
@@ -49,13 +49,13 @@ build:
 
 showcase: build
 	@mkdir -p "$(SHOWCASE_DIR)"
-	@set -e; for sample in scene-0061:15 scene-0103:15 scene-0553:15 scene-0655:15; do \
+	@set -e; for sample in scene-0061:31 scene-0103:32 scene-0553:33 scene-0655:33 scene-0757:33 scene-0796:32 scene-0916:33 scene-1077:13; do \
 	  scene="$${sample%:*}"; count="$${sample#*:}"; \
 	  "$(BUILD_DIR)/bevdet_metis" --config "$(CONFIG)" --scene "$$scene" --frames "$$count" \
 	    --output "$(SHOWCASE_DIR)/$$scene.jsonl"; \
 	done
-	"$(PYTHON)" python/render.py --config "$(CONFIG)" --fps 2 --display-fps "$(DISPLAY_FPS)" --detections \
-	  $(foreach scene,scene-0061 scene-0103 scene-0553 scene-0655,"$(SHOWCASE_DIR)/$(scene).jsonl") \
+	"$(PYTHON)" python/render.py --config "$(CONFIG)" --fps 8 --display-fps "$(DISPLAY_FPS)" --detections \
+	  $(foreach scene,scene-0061 scene-0103 scene-0553 scene-0655 scene-0757 scene-0796 scene-0916 scene-1077,"$(SHOWCASE_DIR)/$(scene).jsonl") \
 	  --output "$(OUTPUT_DIR)/video.mp4"
 
 checkpoint:
