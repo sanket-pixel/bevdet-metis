@@ -4,7 +4,9 @@ Six-camera, camera-only 3D object detection with [FastBEV++](https://github.com/
 
 This is a modular C++ AxRuntime deployment with a Python ONNX/AxRuntime reference, separate from the upstream training framework. It reads nuScenes camera samples and calibration, predicts oriented 3D boxes, and renders the six camera views alongside a bird's-eye view. Boxes include class, confidence, center, dimensions, yaw and planar velocity.
 
-The C++ implementation keeps preprocessing, quantization, layout conversion, padding, inference, field transforms and decoding separate. This is an unfused baseline for correctness and profiling. Inference runs entirely in C++ using AxRuntime; Python is used for the optional presentation and comparisons. There is no tracking, temporal fusion or frame pipelining.
+The C++ implementation fuses normalization, quantization, layout and padding, and keeps features in native INT8 runtime buffers between CNN stages. Image preparation, geometry and feature resizing use parallel CPU work and SIMD. Inference runs entirely in C++ using AxRuntime; Python provides optional presentation and reference comparisons.
+
+The validated unfused implementation is frozen on `main` and tagged [`baseline-cpp-v1`](https://github.com/sanket-pixel/bevdet-metis/tree/baseline-cpp-v1). This branch, `optimize-host`, contains the host optimizations. Models, calibration, thresholds and core allocation are unchanged.
 
 ![Six-camera C++ Metis demonstration](assets/demo.jpg)
 
@@ -97,7 +99,7 @@ make demo BACKEND=aipu
 make video BACKEND=aipu
 ```
 
-`BACKEND=cpp` is the default. `BACKEND=aipu` selects Python AxRuntime; `onnx`, `split` and `upstream` retain the Python references. Use `CONFIG=path/to/config.yaml` to select a config, `OUTPUT_DIR=results/my_run` for another output directory, and `SDK=/path/to/voyager-sdk` for another SDK installation. `BUILD_DIR` selects a CMake build directory and `AXRUNTIME_ROOT` selects the runtime installation, defaulting to `/opt/axelera`.
+`BACKEND=cpp` is the default. `BACKEND=aipu` selects Python AxRuntime; `onnx`, `split` and `upstream` retain the Python references. Use `CONFIG=path/to/config.yaml` to select a config, `OUTPUT_DIR=results/my_run` for another output directory, and `SDK=/path/to/voyager-sdk` for another SDK installation. `BUILD_DIR` selects a CMake build directory and `AXRUNTIME_ROOT` selects the runtime installation, defaulting to `/opt/axelera`. Builds enable `-march=native` by default, including AVX2 kernels on supported x86 hosts. Use `make build NATIVE=OFF` for a portable build with scalar fallbacks; rebuild for the target CPU before copying a native binary to another machine. Floating-point contraction remains disabled and fast-math is not enabled.
 
 Paths inside YAML are relative to the YAML file. The same `configs/default.yaml` is loaded into typed C++ configuration structs and used by Python. It sets model/data directories, scene, CPU threads, score threshold, rotated NMS threshold and maximum detections. Model geometry, normalization and tensor quantization are validated contracts rather than user tuning controls.
 
@@ -114,7 +116,7 @@ To adjust the presentation without repeating inference:
 
 ## Metis execution
 
-The camera backbone is shared, not six separate trained networks. The current implementation calls one image model six times, then lifts and combines its features. It executes synchronously to establish a correct baseline before introducing concurrent camera scheduling or frame pipelining.
+The camera backbone is shared, not six separate trained networks. The current implementation calls one image model six times, then lifts and combines its features. Model calls execute synchronously; batching and concurrent frame scheduling remain future work. Within a frame, camera preparation runs in parallel while the calling thread constructs projection matrices. Projection-index selection and fused feature resizing also use OpenCV's worker pool.
 
 ```text
 6 camera images
@@ -140,15 +142,17 @@ The layout follows `lines-metis`: flat headers/sources with `common` and `infere
 
 | Module | Responsibility |
 | --- | --- |
-| `Preprocessing` | JPEG reads, Pillow-compatible bicubic resize/crop, normalization, camera alignment and projection indices |
+| `Preprocessing` | Parallel JPEG reads, exact bicubic resize/crop, fused normalization + INT8 quantization + physical padding, camera alignment and projection indices |
 | `AipuContext` | Own the shared AxRuntime context |
-| `AipuInference` | Own one model/connection/buffers; separate quantization, layout conversion, padding, execution and output decoding |
-| `ViewTransform` | Sigmoid depth probabilities, feature gathering, height reduction and BEV coordinate order |
-| `FeatureResize` | Native C++ bilinear resize preserving `align_corners` behavior |
+| `AipuInference` | Own one model/connection and fixed-size native INT8 buffers; execute directly, decode outputs when needed |
+| `ViewTransform` | INT8 lookup tables, indexed lift + ordered height reduction + next-model quantization/padding, without materializing the voxel volume |
+| `FeatureResize` | Fused INT8 dequantization, exact `align_corners` resize, requantization and next-model padding; AVX2 channel kernels |
 | `Postprocessing` | CenterPoint box decoding, class-scaled rotated NMS |
 | `Pipeline` | Own and call the stages in order, returning ego-frame detections |
 
-CPU stages use one contiguous NCHW `Tensor` type. `AipuTensorInfo` describes physical runtime storage. Runtime buffers remain backend-owned; `Process()` outputs are valid until that backend's next call. The pipeline retains its stage results for optional validation dumps.
+`AipuTensorInfo` describes native NHWC storage and quantization. Each backend owns its fixed-size input and output buffers; native outputs are valid until that backend's next `Process()` call. Production inference avoids intermediate float NCHW tensors. Only the six small detection heads are decoded for postprocessing. Lookup tables use the validated model metadata, including independent input/output scales.
+
+The float `Tensor` path remains available for validation. Construct `Pipeline(config, true)` to retain traces: each fused physical input is checked byte-for-byte against unfused quantization/layout/padding before model execution. The command-line `--dump-directory` enables this mode. Validation materializes reference intermediates and is intentionally excluded from performance measurements.
 
 ```cpp
 const auto config = bev::LoadConfig("configs/default.yaml");
@@ -171,23 +175,27 @@ Validated on Ubuntu 24.04, Ryzen 7 3700X, Voyager compiler 1.7.0 and AxRuntime 1
 - On 20 `scene-0103` samples, all **775 decoded detections** match Python in class, score, center, yaw and velocity. The largest dimension difference is `4.77e-7 m`.
 - Three full tensor traces have bit-identical preprocessed images, projection indices and all six raw heads. Intermediate BEV floats differ by at most `1.44e-6`, without changing the quantized inference outputs.
 
-The paired C++/Python comparison used the same compiled models, YAML and 20 rig samples. Both runs include the first frame:
+The repeated C++ comparison used the same YAML (`inference.threads=4`), compiled models and 20 rig samples, with three sequential baseline/optimized pairs. Every trial includes the first frame and JPEG reads; model loading, JSON/tensor export and rendering are excluded. On this host:
 
-| Stage | Python AxRuntime | Unfused C++ AxRuntime |
+| Stage | Frozen unfused C++ | Optimized C++ |
 | --- | ---: | ---: |
-| Preprocessing, including JPEG reads | 73.3 ms | 77.2 ms |
-| Inference, including host geometry/resize | 139.8 ms | 140.7 ms |
-| Box decoding and NMS | 4.3 ms | 1.0 ms |
-| Complete pipeline | **217.3 ms** | **218.9 ms** |
-| Processing throughput | 4.60 rig frames/s | 4.57 rig frames/s |
+| Preprocessing, including JPEG reads | 77.0 ms | 32.2 ms |
+| Inference, including host geometry/resize | 138.8 ms | 65.1 ms |
+| Box decoding and NMS | 1.0 ms | 1.7 ms |
+| Complete pipeline | 216.8 ms | 99.0 ms |
+| Time inside AxRuntime calls | 57.9 ms | 58.5 ms |
+| Total host time (pipeline minus runtime calls) | 158.8 ms | 40.5 ms |
+| Processing throughput | 4.61 rig frames/s | 10.10 rig frames/s |
 
-This first C++ port has approximately the same latency as Python. It is not a fused or pipelined implementation. C++ reduces quantization/layout time from 44.9 to 32.4 ms and dequantization/layout time from 10.5 to 5.1 ms, but the straightforward native feature-resize stage takes 22.9 ms versus 7.2 ms in the optimized ONNX Runtime reference. This is a baseline for subsequent kernel work, not a demonstrated overall C++ speedup.
+That is a **2.19× end-to-end speedup** and about **74% less host time**. Host feature resizing fell from approximately 23 ms to 3.1 ms and the BEV view transform from approximately 19 ms to 1.8 ms. The optimized path avoids the 29 MB voxel volume, repeated float NCHW/NHWC conversions and the 33.6 MB float head-input tensor. Exact bicubic resampling processes only source rows contributing to the retained crop. Normalization/quantization, depth sigmoid and heatmap sigmoid use finite lookup tables, preserving the original float operation order.
 
-`make compare` writes `results/cpp/comparison.json`, `python_profile.json`, the C++ profile and three binary tensor traces with JSON shape/dtype descriptions. It exits unsuccessfully if the checked images, indices or heads differ, or if detection fields exceed the documented comparison tolerances in `python/compare_cpp.py`. This checks port parity, not nuScenes mAP/NDS. An additional three samples from `scene-0061` pass with two CPU threads, a 0.5 threshold and paths resolved from a different YAML location.
+All 775 detections are **exactly equal to the frozen C++ outputs** in each paired trial. A separate paired Python run measured 213.3 ms versus 100.0 ms for C++; detection centers, scores, yaw and velocity match exactly, with dimension differences below `1e-6 m`. Three complete tensor traces in each of two scenes have bit-identical raw heads, images and projection indices. Every fused model input also passes physical INT8 byte equality against the unfused operations. A portable `NATIVE=OFF` build passes the same input checks and matches the native build's images, indices and heads on one sample.
 
-Earlier Python host optimization reduced 401 to 205 ms in a separate paired run; that report remains in `results/optimization_validation.json`. Host load affects the absolute timings, so the C++ table uses its fresh paired comparison. Idle [ONNX Runtime worker spinning](https://onnxruntime.ai/docs/performance/tune-performance/threading.html) remains disabled in the Python reference.
+The compact [measurement report](assets/host_optimization.json) records all three trials, validation scope and build settings. Absolute timings depend on host load. CPU parallelism is configurable; the default OpenCV worker count remains four, with projection construction overlapping image preparation on the calling thread. These timings use synchronous inference, without batching or cross-frame pipelining.
 
-`make profile` prints the main stage timings and saves the detailed breakdown in `results/cpp/profile.json`. `BACKEND=aipu` profiles Python. Inference details include total image processing across six cameras, each BEV CNN, host lifting/resizing, and aggregate quantization, AxRuntime execution and dequantization. These are overlapping breakdowns of the inference total; they should not all be added together. AxRuntime execution averages approximately 59 ms across all nine model calls and includes transfers and waiting, rather than measuring only AIPU arithmetic.
+`make compare` writes `results/cpp/comparison.json`, `python_profile.json`, the C++ profile and three binary tensor traces. It fails if fused input bytes differ, checked images/indices/heads differ, or detection fields exceed tolerances in `python/compare_cpp.py`. This checks deployment parity rather than nuScenes mAP/NDS. The second-scene check uses three `scene-0061` samples, two CPU threads, a 0.5 threshold and paths resolved from another YAML location.
+
+`make profile` prints main stage timings and saves the detailed breakdown in `results/cpp/profile.json`; `BACKEND=aipu` profiles Python. Inference details include the image CNN across six cameras, each BEV CNN, fused host lifting/resizing and runtime execution. Quantization now belongs mainly to preprocessing and the fused lifting/resize stages; the standalone quantization counter mostly measures the required backbone-input replica. Detail counters overlap and should not all be added together. AxRuntime execution includes transfers and waiting, rather than measuring only AIPU arithmetic.
 
 Core allocation and scheduling are distinct: four cores are reserved, with one model stage on each, but a single frame still executes those stages in order. Its six camera CNN calls share the image core. Independent frames are not yet pipelined across the stages, so these measurements do not represent full four-core throughput.
 
@@ -198,7 +206,7 @@ INT8 changes detections: the first demo sample gives 33 FP32 boxes and 24 INT8 b
 ```text
 configs/              Runtime configuration
 cpp/include/          Public module interfaces; common/ and inference/ subfolders
-cpp/src/              Separate, unfused module implementations
+cpp/src/              Module implementations and fused host kernels
 cpp/app/main.cpp      Dataset application, JSONL export and profiling
 build/                CMake build and bevdet_metis executable
 python/               Preprocessing, ONNX/AxRuntime, geometry, decoding, rendering

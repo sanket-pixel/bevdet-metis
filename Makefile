@@ -14,6 +14,7 @@ PART ?= all
 OUTPUT_DIR ?= results/$(BACKEND)
 BUILD_DIR ?= build
 JOBS ?= 4
+NATIVE ?= ON
 AXRUNTIME_ROOT ?= /opt/axelera
 
 .PHONY: help setup data models checkpoint build demo video profile calibration compile verify compare
@@ -42,7 +43,7 @@ models:
 	"$(PYTHON)" python/model.py
 
 build:
-	cmake -S cpp -B "$(BUILD_DIR)" -DCMAKE_BUILD_TYPE=Release -DAXRUNTIME_ROOT="$(AXRUNTIME_ROOT)"
+	cmake -S cpp -B "$(BUILD_DIR)" -DCMAKE_BUILD_TYPE=Release -DAXRUNTIME_ROOT="$(AXRUNTIME_ROOT)" -DBEV_NATIVE="$(NATIVE)"
 	cmake --build "$(BUILD_DIR)" -j "$(JOBS)"
 
 checkpoint:

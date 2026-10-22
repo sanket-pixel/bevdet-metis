@@ -6,6 +6,7 @@
 #include <cmath>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <numeric>
 #include <stdexcept>
 
 namespace bev {
@@ -117,8 +118,11 @@ AipuInference::AipuInference(AipuContext& context, const InferenceConfig& config
                 if (nchw[0] != 1 || infos[i].padded_shape.front() != 1 ||
                     infos[i].shape != std::vector<std::int64_t>{nchw[0], nchw[2], nchw[3], nchw[1]})
                     throw std::runtime_error("Logical runtime tensor differs from ONNX shape");
-                if (!input)
-                    outputs_.emplace_back(nchw);
+                if (!input) {
+                    Tensor tensor;
+                    tensor.shape = nchw;
+                    outputs_.push_back(std::move(tensor));
+                }
             }
         }
         for (const auto& info : input_infos_) {
@@ -188,14 +192,13 @@ void AipuInference::PrepareInput(const Tensor& input) {
             std::copy_n(reordered.ptr<std::int8_t>(y * width + x), channels,
                         input_memory_[0].data() + offset);
         }
-    for (std::size_t i = 1; i < input_memory_.size(); ++i)
-        std::copy(input_memory_[0].begin(), input_memory_[0].end(), input_memory_[i].begin());
 }
 
 void AipuInference::DecodeOutputs() {
     for (std::size_t output = 0; output < outputs_.size(); ++output) {
         const auto& info = output_infos_[output];
         auto& tensor = outputs_[output];
+        tensor.data.resize(std::size_t(tensor.shape[1]) * tensor.shape[2] * tensor.shape[3]);
         const int channels = tensor.shape[1], height = tensor.shape[2], width = tensor.shape[3];
         const int padded_width = int(info.padded_shape[2]),
                   padded_channels = int(info.padded_shape[3]);
@@ -220,21 +223,50 @@ void AipuInference::DecodeOutputs() {
     }
 }
 
-const std::vector<Tensor>& AipuInference::Process(const Tensor& input) {
+void AipuInference::Process() {
     const auto start = Clock::now();
-    PrepareInput(input);
+    for (std::size_t i = 1; i < input_memory_.size(); ++i)
+        std::copy(input_memory_[0].begin(), input_memory_[0].end(), input_memory_[i].begin());
     const auto prepared = Clock::now();
     const auto result = axr_run_model_instance(instance_, input_args_.data(), input_args_.size(),
                                                output_args_.data(), output_args_.size());
     if (result != AXR_SUCCESS)
         throw RuntimeError(context_, "AIPU model execution failed");
-    const auto executed = Clock::now();
-    DecodeOutputs();
-    const auto end = Clock::now();
     timings_ = {{"quantization", Milliseconds(start, prepared)},
-                {"runtime_execution", Milliseconds(prepared, executed)},
-                {"dequantization", Milliseconds(executed, end)}};
+                {"runtime_execution", Milliseconds(prepared, Clock::now())},
+                {"dequantization", 0}};
+}
+
+const std::vector<Tensor>& AipuInference::Decode() {
+    const auto start = Clock::now();
+    DecodeOutputs();
+    timings_["dequantization"] += Milliseconds(start, Clock::now());
     return outputs_;
+}
+
+const std::vector<Tensor>& AipuInference::Process(const Tensor& input) {
+    const auto start = Clock::now();
+    PrepareInput(input);
+    const double quantization = Milliseconds(start, Clock::now());
+    Process();
+    timings_["quantization"] += quantization;
+    return Decode();
+}
+
+void AipuInference::ValidateInput(const Tensor& reference) {
+    const auto fused = input_memory_[0];
+    PrepareInput(reference);
+    if (fused != input_memory_[0]) {
+        const auto count = std::inner_product(fused.begin(), fused.end(), input_memory_[0].begin(),
+                                              std::size_t(0), std::plus<>(), std::not_equal_to<>());
+        throw std::runtime_error("Fused input differs from reference: " + std::to_string(count) +
+                                 " bytes");
+    }
+}
+
+std::vector<std::int8_t>& AipuInference::input_buffer() { return input_memory_.front(); }
+const std::vector<std::int8_t>& AipuInference::output_buffer(std::size_t index) const {
+    return output_memory_.at(index);
 }
 
 const AipuTensorInfo& AipuInference::input_info() const { return input_infos_.front(); }

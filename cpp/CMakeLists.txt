@@ -5,6 +5,12 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
+option(BEV_NATIVE "Enable SIMD instructions supported by the build host" ON)
+if(BEV_NATIVE)
+    add_compile_options(-march=native)
+endif()
+add_compile_options(-fno-math-errno)
+
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
 find_package(yaml-cpp REQUIRED)
 find_package(nlohmann_json REQUIRED)

@@ -162,17 +162,51 @@ std::vector<Detection> Suppress(const std::vector<Detection>& boxes,
 Postprocessing::Postprocessing(const PostprocessingConfig& config) : config_(config) {}
 
 std::vector<Detection> Postprocessing::Process(const Heads& heads) const {
+    if (heads[5].shape != std::array<int, 4>{1, 10, 128, 128})
+        throw std::invalid_argument("Unexpected heatmap shape");
+    std::vector<float> scores(10 * 128 * 128);
+    for (std::size_t i = 0; i < scores.size(); ++i) {
+        const float value = std::clamp(heads[5].data[i], -80.0f, 80.0f);
+        scores[i] = 1.0f / (1.0f + std::exp(-value));
+    }
+    return Decode(heads, scores);
+}
+
+std::vector<Detection> Postprocessing::Process(const Heads& heads, const AipuTensorInfo& info,
+                                               const std::vector<std::int8_t>& heatmap) const {
+    if (info.shape != std::vector<std::int64_t>{1, 128, 128, 10} ||
+        heatmap.size() != info.size_bytes)
+        throw std::invalid_argument("Unexpected native heatmap shape");
+    std::array<float, 256> probabilities;
+    for (int i = 0; i < 256; ++i) {
+        const float value = (float(i - 128) - float(info.zero_point)) * float(info.scale);
+        probabilities[i] = 1.0f / (1.0f + std::exp(-std::clamp(value, -80.0f, 80.0f)));
+    }
+    std::vector<float> scores(10 * 128 * 128);
+    for (int y = 0; y < 128; ++y)
+        for (int x = 0; x < 128; ++x) {
+            const auto* source =
+                heatmap.data() +
+                ((y + info.padding[1].first) * info.padded_shape[2] + x + info.padding[2].first) *
+                    info.padded_shape[3] +
+                info.padding[3].first;
+            for (int c = 0; c < 10; ++c)
+                scores[(c * 128 + y) * 128 + x] = probabilities[int(source[c]) + 128];
+        }
+    return Decode(heads, scores);
+}
+
+std::vector<Detection> Postprocessing::Decode(const Heads& heads,
+                                              const std::vector<float>& scores) const {
     constexpr int pixels = 128 * 128;
     constexpr std::array<int, 6> channels{2, 1, 3, 2, 2, 10};
     for (int i = 0; i < 6; ++i)
         if (heads[i].shape != std::array<int, 4>{1, channels[i], 128, 128})
             throw std::invalid_argument("Unexpected detection head shape");
     std::vector<Candidate> candidates;
-    candidates.reserve(10 * pixels);
-    for (int i = 0; i < 10 * pixels; ++i) {
-        const float value = std::clamp(heads[5].data[i], -80.0f, 80.0f);
-        candidates.push_back({1.0f / (1.0f + std::exp(-value)), i});
-    }
+    candidates.reserve(scores.size());
+    for (int i = 0; i < int(scores.size()); ++i)
+        candidates.push_back({scores[i], i});
     Select(candidates.data(), int(candidates.size()), int(candidates.size()) - 500);
     candidates.erase(candidates.begin(), candidates.end() - 500);
     std::stable_sort(candidates.begin(), candidates.end(),

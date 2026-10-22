@@ -25,6 +25,12 @@ public:
     AipuInference& operator=(const AipuInference&) = delete;
     // Backend-owned outputs remain valid until the next Process().
     const std::vector<Tensor>& Process(const Tensor& input);
+    // Native NHWC INT8 path. Keep buffers at their allocated size.
+    void Process();
+    const std::vector<Tensor>& Decode();
+    void ValidateInput(const Tensor& reference);
+    std::vector<std::int8_t>& input_buffer();
+    const std::vector<std::int8_t>& output_buffer(std::size_t index = 0) const;
     const AipuTensorInfo& input_info() const;
     const AipuTensorInfo& output_info(std::size_t index) const;
     const Timings& timings() const;

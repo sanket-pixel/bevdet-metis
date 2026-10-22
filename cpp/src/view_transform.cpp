@@ -7,6 +7,69 @@
 #include <stdexcept>
 
 namespace bev {
+void ViewTransform::Process(const std::array<std::vector<std::int8_t>, 6>& features,
+                            const AipuTensorInfo& source, const PreparedInput& input,
+                            const AipuTensorInfo& target, std::vector<std::int8_t>& output) const {
+    constexpr int pixels = 16 * 44, cells = 128 * 128;
+    if (source.shape != std::vector<std::int64_t>{1, 16, 44, 123} ||
+        target.shape != std::vector<std::int64_t>{1, 128, 128, 64} ||
+        input.coors_img.size() != cells * 7 || input.coors_depth.size() != cells * 7 ||
+        output.size() != target.size_bytes)
+        throw std::invalid_argument("Invalid native BEV transform shapes");
+    std::array<float, 256> values, probabilities;
+    for (int i = 0; i < 256; ++i) {
+        values[i] = (float(i - 128) - float(source.zero_point)) * float(source.scale);
+        probabilities[i] = 1.0f / (1.0f + std::exp(-std::clamp(values[i], -80.0f, 80.0f)));
+    }
+    const int source_channels = int(source.padded_shape[3]);
+    std::vector<float> features_by_pixel(6 * pixels * 64);
+    std::vector<float> depths(6 * pixels * 59);
+    for (int camera = 0; camera < 6; ++camera) {
+        if (features[camera].size() != source.size_bytes)
+            throw std::invalid_argument("Invalid native image feature size");
+        for (int y = 0; y < 16; ++y)
+            for (int x = 0; x < 44; ++x) {
+                const int pixel = camera * pixels + y * 44 + x;
+                const auto* data = features[camera].data() +
+                                   ((y + source.padding[1].first) * source.padded_shape[2] + x +
+                                    source.padding[2].first) *
+                                       source_channels +
+                                   source.padding[3].first;
+                for (int c = 0; c < 64; ++c)
+                    features_by_pixel[pixel * 64 + c] =
+                        pixel == 0 ? 0.0f : values[int(data[59 + c]) + 128];
+                for (int d = 0; d < 59; ++d)
+                    depths[pixel * 59 + d] = pixel == 0 ? 0.5f : probabilities[int(data[d]) + 128];
+            }
+    }
+    cv::parallel_for_(cv::Range(0, 128), [&](const cv::Range& range) {
+        for (int y = range.start; y < range.end; ++y)
+            for (int x = 0; x < 128; ++x) {
+                std::array<float, 64> sums{};
+                for (int z = 0; z < 7; ++z) {
+                    const int voxel = (x * 128 + y) * 7 + z;
+                    const auto pixel = input.coors_img[voxel], depth = input.coors_depth[voxel];
+                    if (pixel < 0 || pixel >= 6 * pixels || depth < 0 || depth >= 6 * pixels * 59)
+                        throw std::invalid_argument("BEV projection index out of range");
+                    const float probability = depths[depth];
+                    const auto* feature = features_by_pixel.data() + pixel * 64;
+                    for (int c = 0; c < 64; ++c)
+                        sums[c] += feature[c] * probability;
+                }
+                auto* destination = output.data() +
+                                    ((y + target.padding[1].first) * target.padded_shape[2] + x +
+                                     target.padding[2].first) *
+                                        target.padded_shape[3] +
+                                    target.padding[3].first;
+                for (int c = 0; c < 64; ++c) {
+                    const float affine = sums[c] / float(target.scale) + float(target.zero_point);
+                    destination[c] =
+                        std::int8_t(std::nearbyint(std::clamp(affine, -128.0f, 127.0f)));
+                }
+            }
+    });
+}
+
 Tensor ViewTransform::Process(const std::array<Tensor, 6>& features,
                               const PreparedInput& input) const {
     constexpr int pixels = 16 * 44, voxels = 128 * 128 * 7;

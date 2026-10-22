@@ -12,11 +12,13 @@
 namespace bev {
 class Pipeline {
 public:
-    explicit Pipeline(const PipelineConfig& config);
+    explicit Pipeline(const PipelineConfig& config, bool retain_tensors = false);
     std::vector<Detection> Process(const Frame& frame, Timings* timings = nullptr);
     void SaveTensors(const std::filesystem::path& directory) const;
 
 private:
+    bool retain_tensors_;
+    std::array<std::vector<std::int8_t>, 6> native_features_;
     AipuContext context_;
     AipuInference image_;
     AipuInference bev_backbone_;

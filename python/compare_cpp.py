@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Compare the unfused C++ deployment with the Python AxRuntime reference."""
+"""Compare the C++ deployment with the Python AxRuntime reference."""
 
 import argparse
 import json

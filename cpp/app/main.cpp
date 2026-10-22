@@ -79,6 +79,9 @@ void PrintProfile(const bev::Timings& means, std::size_t frames) {
               << " six-camera sample(s), including first frame\n";
     for (const auto& name : {"preprocessing", "inference", "postprocessing", "pipeline"})
         std::cout << "  " << std::setw(17) << std::left << name << means.at(name) << " ms\n";
+    std::cout << "  AxRuntime calls:  " << means.at("inference_runtime_execution") << " ms\n"
+              << "  Host total:       "
+              << means.at("pipeline") - means.at("inference_runtime_execution") << " ms\n";
     std::cout
         << "  Processing FPS: " << 1000.0 / means.at("pipeline")
         << "\n  Includes JPEG reads; excludes model loading, JSON/tensor export and rendering\n";
@@ -88,7 +91,7 @@ void Run(const Arguments& args) {
     const auto config = bev::LoadConfig(args.config);
     const bev::Dataset dataset(config.data.directory);
     const auto frames = dataset.frames(config.data.scene, args.start, args.frames);
-    bev::Pipeline pipeline(config);
+    bev::Pipeline pipeline(config, !args.dump_directory.empty());
     if (args.output.has_parent_path())
         std::filesystem::create_directories(args.output.parent_path());
     if (std::filesystem::weakly_canonical(args.output) == std::filesystem::canonical(args.config))

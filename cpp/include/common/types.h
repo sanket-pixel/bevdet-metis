@@ -44,6 +44,7 @@ struct Frame {
 
 struct PreparedInput {
     std::array<Tensor, 6> images;
+    std::array<std::vector<std::int8_t>, 6> quantized_images;
     std::array<cv::Matx44f, 6> camera_to_keyego;
     std::vector<std::int64_t> coors_img;
     std::vector<std::int64_t> coors_depth;
