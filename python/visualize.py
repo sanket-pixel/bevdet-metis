@@ -68,8 +68,7 @@ class Renderer:
             color = CLASS_COLORS[class_name]
             draw.rounded_rectangle((x, y + 4, x + 14, y + 18), radius=4, fill=color)
             draw.text((x + 21, y + 2), class_name.replace("_", " "), font=self.fonts[13], fill=FOREGROUND)
-        draw.text((1512, 12), f"{self.processing_fps:04.1f}", font=self.metric, fill=FOREGROUND)
-        draw.text((1692, 29), "FPS", font=self.fonts[14], fill=SECONDARY)
+        draw.text((1512, 21), f"{self.processing_fps:.1f} FPS", font=self.metric, fill=FOREGROUND)
         draw.text((1515, 61), f"{len(boxes):03d} objects", font=self.fonts[16], fill=SECONDARY)
         draw.line((64, 100, 1856, 100), fill=RULE, width=1)
         draw.line((64, 100, 145, 100), fill=CLASS_COLORS["car"], width=2)
