@@ -1,0 +1,126 @@
+{
+  "upstream_repository": "https://github.com/ymlab/advanced-fastbev",
+  "upstream_commit": "04c2b3610f7c33ebc323723fe90998121e22cfac",
+  "onnx_url": "https://drive.google.com/uc?id=1qefFlah6PkKPtz0Zgh9aqn0rqITjU2C8",
+  "checkpoint_url": "https://drive.google.com/file/d/1q49_7aR7EWWOCAUK8iE5jfj1JdtL9gJy/view",
+  "note": "Published filename says fp16, but the actual inputs, weights and outputs are FP32. Original graph retained unchanged.",
+  "files": {
+    "fastbev_fp16.onnx": {
+      "sha256": "b51beb0c2b3661ca12780ed1790c600fdab1d60005706614f7fad463ed77f2a2"
+    },
+    "fastbev.onnx": {
+      "sha256": "62d5fef4569184b5c91a1ee4597ee36ae061b91ef43be0ed49d4f7e96e8f9c44"
+    },
+    "image.onnx": {
+      "sha256": "79b515e62b47486164b53b1bc70e6d76cbeaf5ecab2a0055d3c595b7eac3e029"
+    },
+    "bev.onnx": {
+      "sha256": "8b52c54716e4b09d476f54d69c5e52ce1c0f7109bf5d3af7acdade47aa04d745"
+    },
+    "bev_backbone.onnx": {
+      "sha256": "e2a9586a254e2899df9085fe82f994ae26915842a28ae64509d9a8b3195cb6b9"
+    },
+    "neck_resize.onnx": {
+      "sha256": "fcf3face792d324d28fc6554030a84b16cf6d02f5f9070b3963f27a3b1dbb69d"
+    },
+    "bev_neck.onnx": {
+      "sha256": "49335ae3f769afc950568472447b0d12c811a77fa94e42b17623f4a61d8e9bbb"
+    },
+    "head_resize.onnx": {
+      "sha256": "8036c38614114b0c510c91087a1c4906b1d164bbb2efa84ef93c1c00590a0490"
+    },
+    "detection_head.onnx": {
+      "sha256": "552eaf6aea973351e54f97f0bfa08dfdb021964b6f287e4e4499d87eb9ccf133"
+    }
+  },
+  "correction": "fastbev.onnx restores the depth Sigmoid used in FastrayTransformer.forward but absent from FastBEVTRT.forward and the published export. No weights changed; unmodified export remains fastbev_fp16.onnx.",
+  "input": {
+    "img": [
+      6,
+      3,
+      256,
+      704
+    ],
+    "coors_img": [
+      114688
+    ],
+    "coors_depth": [
+      114688
+    ]
+  },
+  "output": {
+    "reg": [
+      1,
+      2,
+      128,
+      128
+    ],
+    "height": [
+      1,
+      1,
+      128,
+      128
+    ],
+    "dim": [
+      1,
+      3,
+      128,
+      128
+    ],
+    "rot": [
+      1,
+      2,
+      128,
+      128
+    ],
+    "vel": [
+      1,
+      2,
+      128,
+      128
+    ],
+    "heatmap": [
+      1,
+      10,
+      128,
+      128
+    ]
+  },
+  "operators": {
+    "Conv": 89,
+    "Relu": 71,
+    "MaxPool": 1,
+    "Add": 23,
+    "Resize": 3,
+    "Transpose": 2,
+    "Reshape": 3,
+    "Slice": 3,
+    "Concat": 2,
+    "Gather": 2,
+    "Unsqueeze": 1,
+    "Mul": 1,
+    "ReduceSum": 1
+  },
+  "metis_partitions": [
+    "image",
+    "bev_backbone",
+    "bev_neck",
+    "detection_head"
+  ],
+  "backbone_packing": "One [1,640,64,64] terminal output: skip concatenated with nearest-repeat(deep,4). Host takes every fourth deep sample before the original align_corners resize; FP32 mapping is exact.",
+  "host_resize_graphs": [
+    "neck_resize.onnx",
+    "head_resize.onnx"
+  ],
+  "split": {
+    "image": [
+      "image: 1x3x256x704",
+      "features: 1x123x16x44"
+    ],
+    "host": "Six-camera index gather, sigmoid depth modulation, seven-height sum, XY transpose",
+    "bev": [
+      "bev: 1x64x128x128",
+      "reg, height, dim, rot, vel, heatmap"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+inference:
+  model_directory: ../weights/onnx
+  compiled_model_directory: ../weights/aipu
+  threads: 4
+data:
+  directory: ../data/nuscenes
+  scene: scene-0103
+postprocessing:
+  score_threshold: 0.4
+  nms_threshold: 0.2
+  max_detections: 500

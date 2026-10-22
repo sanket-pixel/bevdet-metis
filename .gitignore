@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+.ruff_cache/
+.pkl_memoize_py3/
+*.py[cod]
+.idea/
+.vscode/
+.env
+/data/
+/results/
+/third_party/
+/build/
+/weights/*
+!/weights/onnx/
+/weights/onnx/*
+!/weights/onnx/provenance.json
