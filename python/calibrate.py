@@ -7,9 +7,9 @@ from pathlib import Path
 from time import perf_counter
 
 import numpy as np
+import onnxruntime as ort
 from common import CAMERAS, ROOT, load_config, sha256
 from dataset import Dataset
-from inference import OnnxInference
 from preprocessing import Preprocessing, view_transform
 
 
@@ -43,12 +43,23 @@ def main():
             )
             return
     preprocessing = Preprocessing(config.dataset_directory)
-    inference = OnnxInference(config, split=True)
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = config.threads
+    options.inter_op_num_threads = 1
+    options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    options.add_session_config_entry("session.inter_op.allow_spinning", "0")
+    image_model = ort.InferenceSession(
+        str(config.model_directory / "image.onnx"),
+        options,
+        providers=["CPUExecutionProvider"],
+    )
     records = []
     start = perf_counter()
     for index, frame in enumerate(frames):
         prepared = preprocessing.Process(frame)
-        features = inference.ImageFeatures(prepared["images"])
+        features = np.concatenate(
+            [image_model.run(None, {"image": image[None]})[0] for image in prepared["images"]]
+        )
         bev = view_transform(features, prepared["coors_img"], prepared["coors_depth"])
         path = folder / f"{index:04d}.npz"
         np.savez_compressed(path, images=prepared["images"], bev=bev)

@@ -6,20 +6,19 @@ PYTHON ?= ../deeplsd-metis/.venv/bin/python
 SDK ?= ../voyager-sdk
 SDK_PYTHON ?= $(SDK)/venv/bin/python
 CONFIG ?= configs/default.yaml
-BACKEND ?= cpp
 FRAMES ?= 80
 FPS ?= 2
 START ?= 0
 CALIB_FRAMES ?= 32
 PART ?= all
-OUTPUT_DIR ?= results/$(BACKEND)
+OUTPUT_DIR ?= results/cpp
 SHOWCASE_DIR ?= results/optimized/final_30s
 BUILD_DIR ?= build
 JOBS ?= 4
 NATIVE ?= ON
 AXRUNTIME_ROOT ?= /opt/axelera
 
-.PHONY: help setup data models checkpoint build demo video showcase profile calibration compile verify compare
+.PHONY: help setup data models checkpoint build demo video showcase profile calibration compile
 
 help:
 	@printf '%s\n' \
@@ -31,12 +30,10 @@ help:
 	  'make demo         Save a six-camera + BEV demo image' \
 	  'make video        Save an 80-frame demo video (FPS=2; override with FPS=10)' \
 	  'make showcase    Run 300 optimized samples; render a 30-second 10 FPS montage' \
-	  'make profile      Profile the selected backend without rendering' \
-	  'make verify       Validate the selected backend (default: C++ vs Python)' \
-	  'make compare      Compare C++ tensors, detections and timing to Python' \
+	  'make profile      Profile the C++ application without rendering' \
 	  'make calibration  Cache 32 mini_train rig frames (192 camera images)' \
 	  'make compile      Compile all four CNN stages; PART=image selects one' \
-	  'Options: BACKEND=cpp|onnx|split|aipu FRAMES=80 FPS=2 START=0 CONFIG=configs/default.yaml'
+	  'Options: FRAMES=80 FPS=2 START=0 CONFIG=configs/default.yaml OUTPUT_DIR=results/cpp'
 
 setup:
 	PYTHON="$(PYTHON)" ./setup.sh
@@ -66,9 +63,8 @@ checkpoint:
 data:
 	"$(PYTHON)" python/download.py data
 
-demo video profile: $(if $(filter cpp,$(BACKEND)),build)
+demo video profile: build
 	@mkdir -p "$(OUTPUT_DIR)"
-ifeq ($(BACKEND),cpp)
 	"$(BUILD_DIR)/bevdet_metis" --config "$(CONFIG)" \
 	  --frames $(if $(filter demo,$@),1,$(FRAMES)) --start "$(START)" \
 	  --output "$(OUTPUT_DIR)/$(if $(filter demo,$@),demo,$(if $(filter profile,$@),profile,video)).jsonl" $(if $(filter profile,$@),--profile)
@@ -77,36 +73,9 @@ ifeq ($(BACKEND),cpp)
 	  --detections "$(OUTPUT_DIR)/$(if $(filter demo,$@),demo,video).jsonl" \
 	  --output "$(OUTPUT_DIR)/$(if $(filter demo,$@),demo.png,video.mp4)" $(if $(filter video,$@),--fps "$(FPS)"); \
 	fi
-else
-ifeq ($(BACKEND),aipu)
-	source "$(SDK)/venv/bin/activate" && "$(SDK_PYTHON)" python/app.py --config "$(CONFIG)" --backend aipu \
-	  --frames $(if $(filter demo,$@),1,$(FRAMES)) --start "$(START)" \
-	  --output "$(OUTPUT_DIR)/$(if $(filter demo,$@),demo.png,$(if $(filter profile,$@),profile.json,video.mp4))" $(if $(filter profile,$@),--profile)
-else
-	"$(PYTHON)" python/app.py --config "$(CONFIG)" --backend "$(BACKEND)" \
-	  --frames $(if $(filter demo,$@),1,$(FRAMES)) --start "$(START)" \
-	  --output "$(OUTPUT_DIR)/$(if $(filter demo,$@),demo.png,$(if $(filter profile,$@),profile.json,video.mp4))" $(if $(filter profile,$@),--profile)
-endif
-endif
 
 calibration:
 	"$(PYTHON)" python/calibrate.py --config "$(CONFIG)" --frames "$(CALIB_FRAMES)"
 
 compile: calibration
 	source "$(SDK)/venv/bin/activate" && "$(SDK_PYTHON)" python/compile.py --config "$(CONFIG)" --part "$(PART)"
-
-compare: build
-	source "$(SDK)/venv/bin/activate" && "$(SDK_PYTHON)" python/compare_cpp.py \
-	  --config "$(CONFIG)" --binary "$(BUILD_DIR)/bevdet_metis" --frames "$(FRAMES)" --start "$(START)" --output-directory "$(OUTPUT_DIR)"
-
-verify: $(if $(filter cpp,$(BACKEND)),build)
-ifeq ($(BACKEND),cpp)
-	source "$(SDK)/venv/bin/activate" && "$(SDK_PYTHON)" python/compare_cpp.py \
-	  --config "$(CONFIG)" --binary "$(BUILD_DIR)/bevdet_metis" --frames "$(FRAMES)" --start "$(START)" --output-directory "$(OUTPUT_DIR)"
-else
-ifeq ($(BACKEND),aipu)
-	source "$(SDK)/venv/bin/activate" && "$(SDK_PYTHON)" python/validate.py --config "$(CONFIG)" --backend aipu
-else
-	"$(PYTHON)" python/validate.py --config "$(CONFIG)"
-endif
-endif

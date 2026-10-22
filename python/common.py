@@ -29,9 +29,6 @@ CLASSES = (
     "traffic_cone",
 )
 HEADS = ("reg", "height", "dim", "rot", "vel", "heatmap")
-NMS_SCALE = (1.0, 0.7, 0.7, 0.4, 0.55, 1.1, 1.0, 1.0, 1.5, 3.5)
-
-
 @dataclass(frozen=True)
 class Config:
     model_directory: Path

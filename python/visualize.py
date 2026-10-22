@@ -6,7 +6,17 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from common import CLASSES
-from postprocessing import corners_bev
+
+
+def corners_bev(box):
+    x, y, _, length, width, _, yaw = box[:7]
+    corners = np.array(
+        [[0.5, 0.5], [0.5, -0.5], [-0.5, -0.5], [-0.5, 0.5]], dtype=np.float32
+    ) * [length, width]
+    cosine, sine = np.cos(yaw), np.sin(yaw)
+    return np.asarray(
+        corners @ np.array([[cosine, sine], [-sine, cosine]]) + [x, y], dtype=np.float32
+    )
 
 BACKGROUND = (17, 20, 19)
 PANEL = (23, 27, 26)

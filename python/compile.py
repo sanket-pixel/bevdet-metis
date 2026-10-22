@@ -9,10 +9,19 @@ from importlib.metadata import version
 from pathlib import Path
 
 import numpy as np
+import onnxruntime as ort
 from common import ROOT, load_config, sha256
-from inference import session
 
 PARTS = ("image", "bev_backbone", "bev_neck", "detection_head")
+
+
+def session(path):
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = 4
+    options.inter_op_num_threads = 1
+    options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    options.add_session_config_entry("session.inter_op.allow_spinning", "0")
+    return ort.InferenceSession(str(path), options, providers=["CPUExecutionProvider"])
 
 
 def validate_runtime_abi(directory, part):
@@ -48,11 +57,11 @@ def validate_runtime_abi(directory, part):
 def calibration(part, manifest, onnx):
     folder = ROOT / "data/calibration"
     backbone = (
-        session(onnx / "bev_backbone.onnx", 4) if part in ("bev_neck", "detection_head") else None
+        session(onnx / "bev_backbone.onnx") if part in ("bev_neck", "detection_head") else None
     )
-    resize = session(onnx / "neck_resize.onnx", 4) if backbone else None
-    neck = session(onnx / "bev_neck.onnx", 4) if part == "detection_head" else None
-    head_resize = session(onnx / "head_resize.onnx", 4) if neck else None
+    resize = session(onnx / "neck_resize.onnx") if backbone else None
+    neck = session(onnx / "bev_neck.onnx") if part == "detection_head" else None
+    head_resize = session(onnx / "head_resize.onnx") if neck else None
     for record in manifest["frames"]:
         path = folder / record["file"]
         if sha256(path) != record["sha256"]:

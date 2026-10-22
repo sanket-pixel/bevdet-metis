@@ -8,24 +8,26 @@ Surround-view 3D perception is useful when a robot or vehicle needs to understan
 
 ## Design and execution
 
-The network shares one image backbone across all six cameras; it is invoked once per camera image. CNN execution is on Metis. Camera projection and the BEV transform are geometric operations, not CNN layers, so they run on the host. Two `align_corners` bilinear resizes also stay on the host because the current Voyager compiler does not support that resize convention on the AIPU.
+The network shares one image backbone across all six cameras; it runs once per camera image. Camera projection and feature lifting are geometric operations and run on the host. Two `align_corners` bilinear resizes also stay on the host because the current Voyager compiler does not support that resize convention on the AIPU.
 
-```text
-six calibrated camera images
-  → resize, normalize, quantize and pad                 [C++ host]
-  → shared image backbone + depth/feature prediction ×6 [Metis, INT8]
-  → camera projection, indexed feature lift and sum      [C++ host]
-  → BEV backbone                                        [Metis, INT8]
-  → exact bilinear resize + feature concatenation        [C++ host]
-  → BEV neck                                            [Metis, INT8]
-  → exact bilinear resize                               [C++ host]
-  → detection head                                      [Metis, INT8]
-  → CenterPoint decode and rotated NMS                   [C++ host]
-```
+| Stage | Operation | Runs on | Measured time/frame |
+| ---: | --- | --- | ---: |
+| 1 | Resize, normalize, quantize and pad six images | C++ host | 32.2 ms, including JPEG reads |
+| 2 | Shared image backbone and depth/feature prediction ×6 | Metis, INT8 | 30.8 ms |
+| 3 | Camera projection, indexed feature lift and height sum | C++ host | 1.9 ms |
+| 4 | BEV backbone | Metis, INT8 | 4.4 ms |
+| 5 | Exact bilinear resize and feature concatenation | C++ host | 3.1 ms combined with stage 7 |
+| 6 | BEV neck | Metis, INT8 | 7.3 ms |
+| 7 | Exact bilinear resize | C++ host | Included in stage 5 timing |
+| 8 | Detection head | Metis, INT8 | 16.0 ms |
+| 9 | CenterPoint decode and rotated NMS | C++ host | 1.7 ms |
+|  | **Complete pipeline** | **Host + Metis** | **99.0 ms (10.10 frames/s)** |
 
-One shared AxRuntime context manages four models, with one Metis core reserved for each CNN stage. A frame passes through the stages sequentially; the six camera calls share the image core. The implementation does not yet batch cameras or pipeline consecutive frames across cores. Preprocessing and selected host kernels use CPU parallelism and SIMD. The C++ backend owns inference and rendering data flow; Python is used for model export, optional reference inference, validation and presentation.
+Stage times are averaged over three 20-frame trials on a Ryzen 7 3700X with Voyager/AxRuntime 1.7.0 and Metis. Stage 5 and stage 7 share one profiling counter; table values are not intended to sum independently to the pipeline total. The pipeline average includes the first frame and six JPEG reads, and excludes model loading, visualization and encoding. A frame passes these stages sequentially. One AxRuntime context owns four model instances, one Metis core per CNN stage, but the six camera calls share the image core. There is no camera batching or cross-frame pipeline yet. Selected host kernels use CPU parallelism and SIMD.
 
-Each `704×256` camera image produces 59 depth-bin logits and 64 feature channels per image location. The host applies the depth sigmoid and uses each camera's calibration to project those features into a `128×128` BEV grid at 0.8 m resolution, accumulating the vertical slices. The BEV CNN then predicts a 10-class heatmap and box attributes: center offset, height, dimensions, yaw and planar velocity.
+Each `704×256` camera image produces 59 depth-bin logits and 64 feature channels per image location. The host applies the depth sigmoid and uses camera calibration to project features into a `128×128` BEV grid at 0.8 m resolution, accumulating vertical slices. The BEV CNN predicts a 10-class heatmap and box attributes: center offset, height, dimensions, yaw and planar velocity.
+
+All application inference runs in the C++ program. Python is kept for checkpoint/data downloads, PyTorch model definition and ONNX export, offline PTQ calibration and compilation tools, and optional rendering. ONNX Runtime is used offline to prepare intermediate calibration tensors; there is no Python ONNX/AxRuntime inference app or runtime backend.
 
 ## Quick start
 
@@ -55,7 +57,7 @@ sudo apt install build-essential cmake pkg-config libopencv-dev libyaml-cpp-dev 
   nlohmann-json3-dev libssl-dev libopenblas-dev
 ```
 
-Metis inference needs a compatible Voyager SDK/AxRuntime installation and connected hardware. `BACKEND=onnx` runs the CPU ONNX reference without Metis; `BACKEND=aipu` selects the Python AxRuntime reference.
+Metis inference needs a compatible Voyager SDK/AxRuntime installation and connected hardware. Runtime inference is performed by the C++ application.
 
 ## Data and model weights
 
@@ -80,9 +82,6 @@ The dataset, model and derived demonstration imagery have their own distribution
 | `make video` | Save a video and detections under `results/cpp/` |
 | `make showcase` | Run the selected 300-frame, multi-scene showcase and render a 30-second video |
 | `make profile` | Profile without rendering; save timing JSON under `results/cpp/` |
-| `make compare` | Compare the C++ pipeline with Python AxRuntime, including tensor traces |
-| `make verify BACKEND=onnx` | Check full ONNX against partitions and the PyTorch view transform |
-| `make verify BACKEND=aipu` | Compare FP32 reference and INT8 Metis outputs on validation frames |
 
 Common options:
 
@@ -90,17 +89,15 @@ Common options:
 make video FRAMES=30 START=5 FPS=10
 make showcase SHOWCASE_DIR=results/my_showcase
 make profile FRAMES=20
-make demo BACKEND=onnx
-make video BACKEND=aipu
 make compile PART=image
 make build NATIVE=OFF
 ```
 
-`BACKEND` defaults to `cpp` and accepts `cpp`, `onnx`, `split` or `aipu`. `FRAMES`, `START`, `FPS`, `CONFIG`, `OUTPUT_DIR`, `PYTHON`, `SDK`, `BUILD_DIR` and `JOBS` can be set on the make command line. See `make help` for defaults. Configuration is in [configs/default.yaml](configs/default.yaml); paths are relative to that YAML file. The video `FPS` setting controls playback cadence, not the inference rate. `make profile` includes JPEG reads and preprocessing, and excludes model loading, rendering and encoding.
+`FRAMES`, `START`, `FPS`, `CONFIG`, `OUTPUT_DIR`, `PYTHON`, `SDK`, `BUILD_DIR` and `JOBS` can be set on the make command line. See `make help` for defaults. Configuration is in [configs/default.yaml](configs/default.yaml); paths are relative to that YAML file. The video `FPS` setting controls playback cadence, not the inference rate. `make profile` includes JPEG reads and preprocessing, and excludes model loading, rendering and encoding.
 
 ## Performance and profiling
 
-On a Ryzen 7 3700X with Voyager/AxRuntime 1.7.0 and a Metis device, the optimized C++ pipeline averaged **99.0 ms per six-camera rig frame (10.10 frames/s)** over three paired trials of 20 `scene-0103` samples. The fixed workload includes the first frame and JPEG reads; it excludes model loading, JSON/tensor export, visualization and encoding.
+The stage-by-stage measurements are shown in the architecture table above. For a coarser view, the same trials averaged:
 
 | Stage | Mean time |
 | --- | ---: |
