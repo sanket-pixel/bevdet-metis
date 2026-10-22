@@ -15,7 +15,6 @@ SECONDARY = (142, 148, 140)
 RULE = (53, 60, 56)
 GRID = (39, 47, 43)
 AXIS = (78, 88, 79)
-OUTLINE = (14, 17, 16)
 CLASS_COLORS = dict(zip(CLASSES, (
     (239, 182, 82),     # car — honey
     (232, 117, 83),     # truck — vermilion
@@ -104,7 +103,6 @@ class Renderer:
                     if depth[first] > 0.1 and depth[second] > 0.1:
                         edge = [tuple(xy[first]), tuple(xy[second])]
                         color = CLASS_COLORS[box["class"]]
-                        panel_draw.line(edge, fill=OUTLINE, width=5)
                         panel_draw.line(edge, fill=color, width=2)
 
             column, row = camera % 2, camera // 2
@@ -146,7 +144,6 @@ class Renderer:
             polygon = corners_bev([*box["center"], *box["dimensions"], box["yaw"]])
             points = [project(point) for point in polygon]
             color = CLASS_COLORS[box["class"]]
-            bev_draw.line(points + [points[0]], fill=OUTLINE, width=7)
             bev_draw.line(points + [points[0]], fill=color, width=3)
             nose = np.asarray(box["center"][:2]) + np.asarray(
                 [np.cos(box["yaw"]), np.sin(box["yaw"])]
