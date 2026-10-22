@@ -12,8 +12,8 @@ DISPLAY_FPS ?= 10.10
 START ?= 0
 CALIB_FRAMES ?= 32
 PART ?= all
-OUTPUT_DIR ?= results/cpp
-SHOWCASE_DIR ?= results/optimized/final_30s
+OUTPUT_DIR ?= results/aipu
+SHOWCASE_DIR ?= results/aipu/showcase
 BUILD_DIR ?= build
 JOBS ?= 4
 NATIVE ?= ON
@@ -30,7 +30,7 @@ help:
 	  'make data         Download nuScenes mini; retain camera keyframes + metadata' \
 	  'make demo         Save a six-camera + BEV demo image' \
 	  'make video        Save an 80-frame demo video (FPS=2; override with FPS=10)' \
-	  'make showcase    Run 300 optimized samples; render a 30-second 10.10 FPS montage' \
+	  'make showcase    Run 60 samples; render a 30-second montage at nuScenes cadence' \
 	  'make profile      Profile the C++ application without rendering' \
 	  'make calibration  Cache 32 mini_train rig frames (192 camera images)' \
 	  'make compile      Compile all four CNN stages; PART=image selects one' \
@@ -49,14 +49,14 @@ build:
 
 showcase: build
 	@mkdir -p "$(SHOWCASE_DIR)"
-	@set -e; for sample in scene-0061:39 scene-0103:40 scene-0553:41 scene-0655:41 scene-0757:41 scene-0796:40 scene-0916:41 scene-1077:17; do \
+	@set -e; for sample in scene-0061:15 scene-0103:15 scene-0553:15 scene-0655:15; do \
 	  scene="$${sample%:*}"; count="$${sample#*:}"; \
 	  "$(BUILD_DIR)/bevdet_metis" --config "$(CONFIG)" --scene "$$scene" --frames "$$count" \
 	    --output "$(SHOWCASE_DIR)/$$scene.jsonl"; \
 	done
-	"$(PYTHON)" python/render.py --config "$(CONFIG)" --fps 10 --display-fps "$(DISPLAY_FPS)" --detections \
-	  $(foreach scene,scene-0061 scene-0103 scene-0553 scene-0655 scene-0757 scene-0796 scene-0916 scene-1077,"$(SHOWCASE_DIR)/$(scene).jsonl") \
-	  --output "$(SHOWCASE_DIR)/bevdet_metis_30s_10_10fps.mp4"
+	"$(PYTHON)" python/render.py --config "$(CONFIG)" --fps 2 --display-fps "$(DISPLAY_FPS)" --detections \
+	  $(foreach scene,scene-0061 scene-0103 scene-0553 scene-0655,"$(SHOWCASE_DIR)/$(scene).jsonl") \
+	  --output "$(OUTPUT_DIR)/video.mp4"
 
 checkpoint:
 	"$(PYTHON)" python/download.py checkpoint
