@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""CPU ONNX Runtime sessions for the published graph and the extracted CNNs."""
+"""CPU ONNX Runtime sessions for the exported model and its CNN partitions."""
 
 import json
 
@@ -19,21 +19,18 @@ def session(path, threads):
 
 
 class OnnxInference:
-    def __init__(self, config, split=False, upstream=False):
+    def __init__(self, config, split=False):
         self.split = split
         folder = config.model_directory
         metadata = json.loads((folder / "provenance.json").read_text())
-        full_model = "fastbev_fp16.onnx" if upstream else "fastbev.onnx"
-        for name in ("image.onnx", "bev.onnx") if split else (full_model,):
+        for name in ("image.onnx", "bev.onnx") if split else ("fastbev.onnx",):
             if sha256(folder / name) != metadata["files"][name]["sha256"]:
                 raise ValueError(f"Model checksum mismatch: {name}")
         if split:
             self.image = session(folder / "image.onnx", config.threads)
             self.bev = session(folder / "bev.onnx", config.threads)
         else:
-            self.model = session(
-                folder / ("fastbev_fp16.onnx" if upstream else "fastbev.onnx"), config.threads
-            )
+            self.model = session(folder / "fastbev.onnx", config.threads)
 
     def ImageFeatures(self, images):
         return np.concatenate([self.image.run(None, {"image": image[None]})[0] for image in images])

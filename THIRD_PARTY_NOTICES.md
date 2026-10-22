@@ -4,13 +4,15 @@
 
 Source: https://github.com/ymlab/advanced-fastbev
 
+Reference revision: `04c2b3610f7c33ebc323723fe90998121e22cfac`.
+
 Pinned revision: `04c2b3610f7c33ebc323723fe90998121e22cfac`.
 
-The upstream repository is licensed under Apache License 2.0 and includes OpenMMLab and Phigent Robotics copyright notices. Its license is preserved in [licenses/fastbev_apache_2.0.txt](licenses/fastbev_apache_2.0.txt). The upstream source is fetched separately into the ignored `third_party/advanced_fastbev` directory; original notices in those files are retained.
+The upstream repository is licensed under Apache License 2.0 and includes OpenMMLab and Phigent Robotics copyright notices. Its license is preserved in [licenses/fastbev_apache_2.0.txt](licenses/fastbev_apache_2.0.txt). `python/model.py` is a standalone PyTorch adaptation of the required model layers and carries the original Phigent Robotics copyright notice. The project does not clone or import the upstream repository, OpenMMLab, MMCV or MMDetection.
 
-The deployment's image preparation, camera projection/view transform, CenterPoint decoding and class-scaled rotated NMS follow the upstream implementation and configuration. These operations have been rewritten for standalone Python and C++ execution; source-derived modules carry an attribution notice. Geometry is independently checked against unmodified upstream method bodies when PyTorch is installed.
+The deployment's image preparation, camera projection/view transform, CenterPoint decoding and class-scaled rotated NMS follow the upstream implementation and configuration. These operations have been rewritten for standalone Python and C++ execution. The ONNX models are exported from the standalone PyTorch model and official checkpoint; the checkpoint is a separate third-party model asset and is not included in Git.
 
-The published ONNX and optional PyTorch checkpoint are downloaded separately from the upstream model zoo. They are not included in Git. No additional license is granted here for model assets or their training data; users must follow the upstream distribution terms. The original ONNX is preserved. A separately generated graph restores the sigmoid present in the normal upstream model's depth path; provenance records the change and model hashes.
+No additional license is granted here for model assets or their training data; users must follow the upstream distribution terms. The checkpoint URL, its checksum and generated ONNX checksums are recorded in `weights/onnx/provenance.json`.
 
 ## nuScenes data and demonstration imagery
 

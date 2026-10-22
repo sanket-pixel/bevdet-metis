@@ -1,39 +1,8 @@
 {
-  "upstream_repository": "https://github.com/ymlab/advanced-fastbev",
-  "upstream_commit": "04c2b3610f7c33ebc323723fe90998121e22cfac",
-  "onnx_url": "https://drive.google.com/uc?id=1qefFlah6PkKPtz0Zgh9aqn0rqITjU2C8",
-  "checkpoint_url": "https://drive.google.com/file/d/1q49_7aR7EWWOCAUK8iE5jfj1JdtL9gJy/view",
-  "note": "Published filename says fp16, but the actual inputs, weights and outputs are FP32. Original graph retained unchanged.",
-  "files": {
-    "fastbev_fp16.onnx": {
-      "sha256": "b51beb0c2b3661ca12780ed1790c600fdab1d60005706614f7fad463ed77f2a2"
-    },
-    "fastbev.onnx": {
-      "sha256": "62d5fef4569184b5c91a1ee4597ee36ae061b91ef43be0ed49d4f7e96e8f9c44"
-    },
-    "image.onnx": {
-      "sha256": "79b515e62b47486164b53b1bc70e6d76cbeaf5ecab2a0055d3c595b7eac3e029"
-    },
-    "bev.onnx": {
-      "sha256": "8b52c54716e4b09d476f54d69c5e52ce1c0f7109bf5d3af7acdade47aa04d745"
-    },
-    "bev_backbone.onnx": {
-      "sha256": "e2a9586a254e2899df9085fe82f994ae26915842a28ae64509d9a8b3195cb6b9"
-    },
-    "neck_resize.onnx": {
-      "sha256": "fcf3face792d324d28fc6554030a84b16cf6d02f5f9070b3963f27a3b1dbb69d"
-    },
-    "bev_neck.onnx": {
-      "sha256": "49335ae3f769afc950568472447b0d12c811a77fa94e42b17623f4a61d8e9bbb"
-    },
-    "head_resize.onnx": {
-      "sha256": "8036c38614114b0c510c91087a1c4906b1d164bbb2efa84ef93c1c00590a0490"
-    },
-    "detection_head.onnx": {
-      "sha256": "552eaf6aea973351e54f97f0bfa08dfdb021964b6f287e4e4499d87eb9ccf133"
-    }
-  },
-  "correction": "fastbev.onnx restores the depth Sigmoid used in FastrayTransformer.forward but absent from FastBEVTRT.forward and the published export. No weights changed; unmodified export remains fastbev_fp16.onnx.",
+  "source": "Standalone PyTorch implementation and official epoch_20_ema.pth checkpoint",
+  "checkpoint": "../torch/epoch_20_ema.pth",
+  "checkpoint_sha256": "4488f70ce58d2313b21a5cf26fa4dee96599d4683a4bb225814da6f4d90ef4f2",
+  "opset": 17,
   "input": {
     "img": [
       6,
@@ -86,20 +55,31 @@
       128
     ]
   },
-  "operators": {
-    "Conv": 89,
-    "Relu": 71,
-    "MaxPool": 1,
-    "Add": 23,
-    "Resize": 3,
-    "Transpose": 2,
-    "Reshape": 3,
-    "Slice": 3,
-    "Concat": 2,
-    "Gather": 2,
-    "Unsqueeze": 1,
-    "Mul": 1,
-    "ReduceSum": 1
+  "files": {
+    "image.onnx": {
+      "sha256": "69f00a6016e0cc79b439a1a314db87d868e57e748b414b7c5e86655ebfb998dc"
+    },
+    "bev_backbone.onnx": {
+      "sha256": "6550947b3cfc39066884c34136c7e6e2625bd233e4e17cb3544d96792bb958c3"
+    },
+    "neck_resize.onnx": {
+      "sha256": "13c9426ea8b2416132de2fed065958c3a55af1f689cf5307af70f679786fe7ae"
+    },
+    "bev_neck.onnx": {
+      "sha256": "9ca13bd482ae5a2657f85d578182e74ce4913bec503c1dd9b6d175b3c5aa3c8e"
+    },
+    "head_resize.onnx": {
+      "sha256": "99eddf464e67f0dd0d646be177d7413f71d9469efbb781755c2cc93da0bcc9ee"
+    },
+    "detection_head.onnx": {
+      "sha256": "baca2d396f846acedc427a4e6b51b9e59bec53c87d1b79cbbcbb3d990557c14e"
+    },
+    "bev.onnx": {
+      "sha256": "4c0dff9ccdfa76e0c49ef7cd8f2ee2b47b5cdc749cedff790dc88d0497daf426"
+    },
+    "fastbev.onnx": {
+      "sha256": "023087e610045dad86431e10ec445b73631ee0169a64f54a6ab86037d024ae19"
+    }
   },
   "metis_partitions": [
     "image",
@@ -107,20 +87,9 @@
     "bev_neck",
     "detection_head"
   ],
-  "backbone_packing": "One [1,640,64,64] terminal output: skip concatenated with nearest-repeat(deep,4). Host takes every fourth deep sample before the original align_corners resize; FP32 mapping is exact.",
   "host_resize_graphs": [
-    "neck_resize.onnx",
-    "head_resize.onnx"
+    "neck_resize",
+    "head_resize"
   ],
-  "split": {
-    "image": [
-      "image: 1x3x256x704",
-      "features: 1x123x16x44"
-    ],
-    "host": "Six-camera index gather, sigmoid depth modulation, seven-height sum, XY transpose",
-    "bev": [
-      "bev: 1x64x128x128",
-      "reg, height, dim, rot, vel, heatmap"
-    ]
-  }
+  "depth": "Sigmoid is applied to the 59 depth logits before camera lifting, matching the training model."
 }

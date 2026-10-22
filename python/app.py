@@ -16,7 +16,7 @@ from visualize import Renderer
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=ROOT / "configs/default.yaml")
-    parser.add_argument("--backend", choices=["onnx", "split", "upstream", "aipu"], default="onnx")
+    parser.add_argument("--backend", choices=["onnx", "split", "aipu"], default="onnx")
     parser.add_argument("--frames", type=int, default=1)
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--output", type=Path)
@@ -30,7 +30,7 @@ def main():
     if len(frames) != args.frames:
         parser.error(f"Selected scene has only {len(frames)} available frames at this start")
     pipeline = Pipeline(config, args.backend)
-    renderer = Renderer(config.dataset_directory, args.backend)
+    renderer = Renderer(config.dataset_directory, 0.0)
     output = args.output or ROOT / "results" / args.backend / (
         "demo.png" if len(frames) == 1 else "demo.mp4"
     )
@@ -102,7 +102,10 @@ def main():
                     + "\n"
                 )
                 if not args.profile:
-                    rendered = renderer.Process(frame, boxes, prepared, timings, index, len(frames))
+                    renderer.processing_fps = 1000.0 / np.mean(
+                        [entry["pipeline"] for entry in all_timings]
+                    )
+                    rendered = renderer.Process(frame, boxes, prepared, index, len(frames))
                     if writer:
                         writer.stdin.write(rendered.tobytes())
                     else:

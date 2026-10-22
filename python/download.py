@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Fetch the upstream ONNX and the smallest official nuScenes release."""
+"""Fetch the published checkpoint and the smallest official nuScenes release."""
 
 import argparse
 import hashlib
@@ -13,9 +13,7 @@ from pathlib import Path
 import requests
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL_URL = "https://drive.google.com/uc?id=1qefFlah6PkKPtz0Zgh9aqn0rqITjU2C8"
 DATA_URL = "https://www.nuscenes.org/data/v1.0-mini.tgz"
-MODEL_SHA256 = "b51beb0c2b3661ca12780ed1790c600fdab1d60005706614f7fad463ed77f2a2"
 DATA_SHA256 = "943037abbb3b26b3070dc76504a43eb440503b00baf9ac2f1538d9c03fc9298f"
 CHECKPOINT_URL = "https://drive.google.com/uc?id=1q49_7aR7EWWOCAUK8iE5jfj1JdtL9gJy"
 CHECKPOINT_SHA256 = "4488f70ce58d2313b21a5cf26fa4dee96599d4683a4bb225814da6f4d90ef4f2"
@@ -92,28 +90,21 @@ def download_mini():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("asset", choices=["model", "data", "checkpoint"])
+    parser.add_argument("asset", choices=["data", "checkpoint"])
     args = parser.parse_args()
-    if args.asset in ("model", "checkpoint"):
+    if args.asset == "checkpoint":
         import gdown
 
-        path = ROOT / (
-            "weights/onnx/fastbev_fp16.onnx"
-            if args.asset == "model"
-            else "weights/torch/epoch_20_ema.pth"
-        )
+        path = ROOT / "weights/torch/epoch_20_ema.pth"
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists():
             temporary = path.with_suffix(path.suffix + ".partial")
-            gdown.download(
-                MODEL_URL if args.asset == "model" else CHECKPOINT_URL, str(temporary), quiet=True
-            )
+            gdown.download(CHECKPOINT_URL, str(temporary), quiet=True)
             temporary.replace(path)
-        expected = MODEL_SHA256 if args.asset == "model" else CHECKPOINT_SHA256
         with path.open("rb") as stream:
-            if hashlib.file_digest(stream, "sha256").hexdigest() != expected:
-                raise ValueError(f"Published {args.asset} checksum mismatch")
-        print(f"Model: {path} ({path.stat().st_size / 1e6:.1f} MB)", flush=True)
+            if hashlib.file_digest(stream, "sha256").hexdigest() != CHECKPOINT_SHA256:
+                raise ValueError("Published checkpoint checksum mismatch")
+        print(f"Checkpoint: {path} ({path.stat().st_size / 1e6:.1f} MB)", flush=True)
         return
     folder = ROOT / "data/nuscenes"
     if (folder / "download.json").exists():

@@ -6,3 +6,4 @@ Pillow==12.3.0
 PyYAML==6.0.3
 gdown==6.4.2
 requests==2.34.2
+torch>=2.0

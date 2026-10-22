@@ -16,9 +16,7 @@ class Pipeline:
 
             self.inference = AipuInference(config)
         else:
-            self.inference = OnnxInference(
-                config, split=backend == "split", upstream=backend == "upstream"
-            )
+            self.inference = OnnxInference(config, split=backend == "split")
         self.postprocessing = Postprocessing(config)
 
     def Process(self, frame):

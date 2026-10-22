@@ -1,6 +1,6 @@
 # bevdet-metis
 
-Six-camera, camera-only 3D object detection with [FastBEV++](https://github.com/ymlab/advanced-fastbev), starting from its published ONNX model and targeting Axelera Metis.
+Six-camera, camera-only 3D object detection with [FastBEV++](https://github.com/ymlab/advanced-fastbev), exported from its published PyTorch checkpoint and deployed on Axelera Metis.
 
 This is a modular C++ AxRuntime deployment with a Python ONNX/AxRuntime reference, separate from the upstream training framework. It reads nuScenes camera samples and calibration, predicts oriented 3D boxes, and renders the six camera views alongside a bird's-eye view. Boxes include class, confidence, center, dimensions, yaw and planar velocity.
 
@@ -20,7 +20,7 @@ make setup
 make models
 make data
 make build
-make compile                  # Reuses existing compiled stages when unchanged
+make compile                  # Quantize and compile the exported CNN stages
 make demo
 make video
 make compare
@@ -42,19 +42,19 @@ sudo apt install build-essential cmake pkg-config libopencv-dev libyaml-cpp-dev 
   nlohmann-json3-dev libssl-dev libopenblas-dev
 ```
 
-Git, uv and FFmpeg with libx264 are needed for setup and presentation. `make setup` also fetches the pinned upstream source for the independent geometry verification. PyTorch is optional for that comparison and is already available in the shared environment; ordinary ONNX inference needs no PyTorch, MMCV or CUDA. `BACKEND=onnx` runs the Python CPU reference without building C++ or requiring Metis hardware.
+Git, uv and FFmpeg with libx264 are needed for setup and presentation. `make setup` installs CPU PyTorch, ONNX Runtime and the small Python dependencies. The model and export code are local; setup does not clone the training repository or install MMCV, MMDetection or CUDA. `BACKEND=onnx` runs the Python CPU reference without building C++ or requiring Metis hardware.
 
 ## Model and data
 
-`make models` downloads the [official ONNX export](https://drive.google.com/file/d/1qefFlah6PkKPtz0Zgh9aqn0rqITjU2C8/view), checks its SHA-256, and prepares the CPU and Metis partitions. Despite its `fastbev_fp16.onnx` filename, this particular export has FP32 weights, inputs and outputs. Its shared ResNet-50 image encoder processes six `3×256×704` camera images; the BEV grid is `128×128` over approximately `102.4×102.4 m`.
+`make models` downloads the [official `epoch_20_ema.pth` checkpoint](https://drive.google.com/file/d/1q49_7aR7EWWOCAUK8iE5jfj1JdtL9gJy/view), checks its SHA-256, and exports the full ONNX model and the CPU/Metis partitions from the standalone PyTorch architecture in `python/model.py`. The shared ResNet-50 image encoder processes six `3×256×704` camera images; the BEV grid is `128×128` over approximately `102.4×102.4 m`.
 
-The [original `epoch_20_ema.pth` checkpoint](https://drive.google.com/file/d/1q49_7aR7EWWOCAUK8iE5jfj1JdtL9gJy/view) is available too:
+To download the checkpoint without exporting models:
 
 ```bash
 make checkpoint
 ```
 
-It is optional; inference and compilation start directly from ONNX. Asset URLs, upstream revision and generated model checksums are recorded in [weights/onnx/provenance.json](weights/onnx/provenance.json).
+The model implementation uses plain PyTorch modules and loads the checkpoint strictly. Export details, source checksum and generated ONNX checksums are recorded in `weights/onnx/provenance.json`.
 
 `make data` downloads the smallest official packaged release, [nuScenes v1.0-mini](https://www.nuscenes.org/nuscenes), verifies the archive, and retains only camera keyframes and metadata:
 
@@ -67,11 +67,11 @@ It is optional; inference and compilation start directly from ONNX. Asset URLs, 
 
 The archive is removed after successful extraction. LiDAR, radar, maps and sweeps are not retained or required. Calibration and camera poses come from nuScenes metadata; six arbitrary JPEGs without calibration are not a substitute for a rig sample. nuScenes data and derived demo imagery are under CC BY-NC-SA 4.0; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-### Export correction
+### PyTorch export
 
-The pinned upstream `FastrayTransformer.forward()` applies a sigmoid to depth logits before lifting image features into BEV. `FastBEVTRT.forward()` and the published ONNX omit that sigmoid. The original export is preserved byte-for-byte as `fastbev_fp16.onnx`; the default `fastbev.onnx` restores this one operation without changing weights. The host view transform uses the same sigmoid.
+The model applies sigmoid to its 59 depth logits before lifting image features into BEV. This operation is present in `python/model.py` and all exported graphs. On a real frame, the generated full ONNX outputs match the prior reference export within `3e-5` absolute error.
 
-`BACKEND=upstream` runs the unmodified export for comparison. This project does not claim a reproduced nuScenes mAP/NDS result. The correction and the INT8 deployment still need a full accuracy evaluation.
+This project does not claim a reproduced nuScenes mAP/NDS result. The INT8 deployment still needs a full accuracy evaluation.
 
 ## Commands
 
@@ -84,7 +84,7 @@ The pinned upstream `FastrayTransformer.forward()` applies a sigmoid to depth lo
 | `make profile` | C++ timings without rendering or encoding |
 | `make compare` | Compare C++ with Python AxRuntime on 20 samples and dump/check three tensor traces |
 | `make verify` | Same C++ comparison by default |
-| `make verify BACKEND=onnx` | Corrected full ONNX vs partitions and upstream geometry |
+| `make verify BACKEND=onnx` | Full ONNX vs partitions and standalone PyTorch view transform |
 | `make verify BACKEND=aipu` | Run Metis on the same samples and report INT8/FP32 differences |
 | `make calibration` | Cache 32 `mini_train` rig samples / 192 camera images |
 | `make compile` | Quantize and compile the CNN stages using Voyager |
@@ -101,7 +101,7 @@ make demo BACKEND=aipu
 make video BACKEND=aipu
 ```
 
-`BACKEND=cpp` is the default. `BACKEND=aipu` selects Python AxRuntime; `onnx`, `split` and `upstream` retain the Python references. Use `CONFIG=path/to/config.yaml` to select a config, `OUTPUT_DIR=results/my_run` for another output directory, and `SDK=/path/to/voyager-sdk` for another SDK installation. `BUILD_DIR` selects a CMake build directory and `AXRUNTIME_ROOT` selects the runtime installation, defaulting to `/opt/axelera`. Builds enable `-march=native` by default, including AVX2 kernels on supported x86 hosts. Use `make build NATIVE=OFF` for a portable build with scalar fallbacks; rebuild for the target CPU before copying a native binary to another machine. Floating-point contraction remains disabled and fast-math is not enabled.
+`BACKEND=cpp` is the default. `BACKEND=aipu` selects Python AxRuntime; `onnx` runs the full exported model and `split` runs the exported partitions. Use `CONFIG=path/to/config.yaml` to select a config, `OUTPUT_DIR=results/my_run` for another output directory, and `SDK=/path/to/voyager-sdk` for another SDK installation. `BUILD_DIR` selects a CMake build directory and `AXRUNTIME_ROOT` selects the runtime installation, defaulting to `/opt/axelera`. Builds enable `-march=native` by default, including AVX2 kernels on supported x86 hosts. Use `make build NATIVE=OFF` for a portable build with scalar fallbacks; rebuild for the target CPU before copying a native binary to another machine. Floating-point contraction remains disabled and fast-math is not enabled.
 
 Paths inside YAML are relative to the YAML file. The same `configs/default.yaml` is loaded into typed C++ configuration structs and used by Python. It sets model/data directories, scene, CPU threads, score threshold, rotated NMS threshold and maximum detections. Model geometry, normalization and tensor quantization are validated contracts rather than user tuning controls.
 
@@ -172,7 +172,7 @@ Preprocessing preserves the upstream BGR channel convention and Pillow's antiali
 Validated on Ubuntu 24.04, Ryzen 7 3700X, Voyager compiler 1.7.0 and AxRuntime 1.7.0, using connected Metis hardware. The two Python environments are deliberate: ONNX/data preparation uses the existing uv environment; compilation and AxRuntime use the SDK's own environment without installing packages into it.
 
 - Three real rig samples pass full corrected ONNX versus partitioned ONNX comparison (`rtol=5e-5`, `atol=2e-5`); the largest absolute head difference is `1.15e-5`.
-- All 114,688 image/depth projection indices match the unmodified upstream PyTorch implementation on the checked sample. The BEV maximum absolute difference is `1.91e-6`.
+- The checked frame uses 114,688 image/depth projection entries. Its NumPy host view transform and the standalone PyTorch implementation differ by at most `1.91e-6` in the resulting BEV tensor.
 - All four compiled CNN stages run in either a standalone C++ process or the Python reference on four reserved Metis cores.
 - On 20 `scene-0103` samples, all **775 decoded detections** match Python in class, score, center, yaw and velocity. The largest dimension difference is `4.77e-7 m`.
 - Three full tensor traces have bit-identical preprocessed images, projection indices and all six raw heads. Intermediate BEV floats differ by at most `1.44e-6`, without changing the quantized inference outputs.
@@ -212,12 +212,12 @@ cpp/src/              Module implementations and fused host kernels
 cpp/app/main.cpp      Dataset application, JSONL export and profiling
 build/                CMake build and bevdet_metis executable
 python/               Preprocessing, ONNX/AxRuntime, geometry, decoding, rendering
-weights/onnx/         Published model, corrected model, CNN partitions, provenance
+weights/torch/        Published model checkpoint
+weights/onnx/         ONNX exports, CNN partitions and provenance
 weights/aipu/         Compiled per-stage runtime bundles
 data/nuscenes/        Camera keyframes and calibration/annotation metadata
 data/calibration/     Reproducible real-image / BEV calibration cache
 results/              Videos, images, JSONL detections, profiles and validation reports
-third_party/          Pinned upstream source, fetched by setup
 ```
 
 Downloaded data, model binaries, compiler artifacts, build output and results are ignored by Git.

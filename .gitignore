@@ -8,7 +8,6 @@ __pycache__/
 .env
 /data/
 /results/
-/third_party/
 /build/
 /weights/*
 !/weights/onnx/

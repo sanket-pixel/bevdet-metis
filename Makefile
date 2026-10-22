@@ -25,8 +25,8 @@ help:
 	@printf '%s\n' \
 	  'make setup        Add dependencies to the existing uv environment' \
 	  'make build        Build the modular C++ AxRuntime application' \
-	  'make models       Download ONNX + prepare image/BEV CNN partitions' \
-	  'make checkpoint   Download the optional original PyTorch checkpoint' \
+	  'make models       Download checkpoint + export the ONNX models' \
+	  'make checkpoint   Download the official PyTorch weights' \
 	  'make data         Download nuScenes mini; retain camera keyframes + metadata' \
 	  'make demo         Save a six-camera + BEV demo image' \
 	  'make video        Save an 80-frame demo video (FPS=2; override with FPS=10)' \
@@ -36,14 +36,14 @@ help:
 	  'make compare      Compare C++ tensors, detections and timing to Python' \
 	  'make calibration  Cache 32 mini_train rig frames (192 camera images)' \
 	  'make compile      Compile all four CNN stages; PART=image selects one' \
-	  'Options: BACKEND=cpp|onnx|split|upstream|aipu FRAMES=80 FPS=2 START=0 CONFIG=configs/default.yaml'
+	  'Options: BACKEND=cpp|onnx|split|aipu FRAMES=80 FPS=2 START=0 CONFIG=configs/default.yaml'
 
 setup:
 	PYTHON="$(PYTHON)" ./setup.sh
 
 models:
-	"$(PYTHON)" python/download.py model
-	"$(PYTHON)" python/model.py
+	$(MAKE) checkpoint
+	"$(PYTHON)" python/export.py
 
 build:
 	cmake -S cpp -B "$(BUILD_DIR)" -DCMAKE_BUILD_TYPE=Release -DAXRUNTIME_ROOT="$(AXRUNTIME_ROOT)" -DBEV_NATIVE="$(NATIVE)"
