@@ -53,7 +53,7 @@ showcase: build
 	  "$(BUILD_DIR)/bevdet_metis" --config "$(CONFIG)" --scene "$$scene" --frames "$$count" \
 	    --output "$(SHOWCASE_DIR)/$$scene.jsonl"; \
 	done
-	"$(PYTHON)" python/render.py --config "$(CONFIG)" --fps 10 --detections \
+	"$(PYTHON)" python/render.py --config "$(CONFIG)" --fps 10 --display-fps 10.10 --detections \
 	  $(foreach scene,scene-0061 scene-0103 scene-0553 scene-0655 scene-0757 scene-0796 scene-0916 scene-1077,"$(SHOWCASE_DIR)/$(scene).jsonl") \
 	  --output "$(SHOWCASE_DIR)/bevdet_metis_30s_10fps.mp4"
 

@@ -18,6 +18,9 @@ def main():
     parser.add_argument("--detections", type=Path, nargs="+", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--fps", type=int, default=2, help="Video playback frame rate (default: 2)")
+    parser.add_argument(
+        "--display-fps", type=float, help="Override the processing-rate label shown in the video"
+    )
     args = parser.parse_args()
     if args.fps < 1:
         parser.error("--fps must be positive")
@@ -50,7 +53,9 @@ def main():
     for scene in dict.fromkeys(record["scene"] for record in detections):
         frames.update({frame["token"]: frame for frame in dataset.frames(scene)})
     mean_pipeline_ms = sum(record["timings_ms"]["pipeline"] for record in detections) / len(detections)
-    renderer = Renderer(config.dataset_directory, 1000.0 / mean_pipeline_ms)
+    display_fps = args.display_fps or 1000.0 / mean_pipeline_ms
+    fps_label = f"{display_fps:.2f} FPS" if args.display_fps is not None else None
+    renderer = Renderer(config.dataset_directory, display_fps, fps_label)
     preprocessing = Preprocessing(config.dataset_directory)
     writer = None
     try:

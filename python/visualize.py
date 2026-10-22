@@ -57,9 +57,10 @@ def corners_3d(box):
 
 
 class Renderer:
-    def __init__(self, directory, processing_fps):
+    def __init__(self, directory, processing_fps, fps_label=None):
         self.directory = directory
         self.processing_fps = processing_fps
+        self.fps_label = fps_label or f"{processing_fps:.1f} FPS"
         self.fonts = {size: ImageFont.truetype(str(FONT), size) for size in (13, 14, 16, 18, 24, 30, 38)}
         self.bold = ImageFont.truetype(str(BOLD), 24)
         self.metric = ImageFont.truetype(str(MONO), 37)
@@ -78,7 +79,7 @@ class Renderer:
             color = CLASS_COLORS[class_name]
             draw.rounded_rectangle((x, y + 4, x + 14, y + 18), radius=4, fill=color)
             draw.text((x + 21, y + 2), class_name.replace("_", " "), font=self.fonts[13], fill=FOREGROUND)
-        draw.text((1512, 21), f"{self.processing_fps:.1f} FPS", font=self.metric, fill=FOREGROUND)
+        draw.text((1512, 21), self.fps_label, font=self.metric, fill=FOREGROUND)
         draw.text((1515, 61), f"{len(boxes):03d} objects", font=self.fonts[16], fill=SECONDARY)
         draw.line((64, 100, 1856, 100), fill=RULE, width=1)
         draw.line((64, 100, 145, 100), fill=CLASS_COLORS["car"], width=2)
